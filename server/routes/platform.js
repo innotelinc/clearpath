@@ -18,6 +18,7 @@ import {
 import { createAccount, emailDeliveryNote, sendCredentials } from "../accounts.js";
 import { mailConfigured } from "../mail.js";
 import { throttle } from "../auth.js";
+import { verifyPassword } from "../security.js";
 import {
   authenticatePlatform,
   demoPlatformAdmin,
@@ -60,6 +61,8 @@ function platformActor(req) {
 
 function loginPage(req, res, { error = "", email = "", status = 200 } = {}) {
   const demo = process.env.SEED_DEMO !== "0" ? demoPlatformAdmin() : null;
+  // A remembered login page carries an old CSRF token; never serve it from cache.
+  res.setHeader("Cache-Control", "no-store");
   res.status(status).render("platform/login", {
     title: "Platform console",
     page: "login",
@@ -88,7 +91,23 @@ router.post("/login", (req, res) => {
   }
   const admin = authenticatePlatform(email, req.body.password);
   if (!admin) {
-    return loginPage(req, res, { email, status: 401, error: "That email and password do not match a platform account." });
+    // The most common mistake is a workspace owner typing their tenant
+    // credentials here. Only say so when the password actually proves it, so
+    // the hint cannot be used to discover which emails exist.
+    const workspaceUser = db
+      .prepare("SELECT email, password_hash, password_salt FROM users WHERE lower(email) = lower(?)")
+      .all(email)
+      .find((row) => verifyPassword(req.body.password, row.password_salt, row.password_hash));
+    console.warn(
+      `Clearpath: platform sign-in rejected for ${email || "(blank)"} — ${workspaceUser ? "workspace credentials" : "no matching operator"}`
+    );
+    return loginPage(req, res, {
+      email,
+      status: 401,
+      error: workspaceUser
+        ? `That is a workspace account, not an operator. Sign in at /login instead — the platform console only takes operator emails.`
+        : "That email and password do not match a platform account."
+    });
   }
   issuePlatformSession(res, admin);
   res.redirect(303, safeNext(req.body.next));

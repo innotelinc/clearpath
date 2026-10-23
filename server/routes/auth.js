@@ -22,6 +22,7 @@ function loginPage(req, res, { mode, error = "", notice = "", email = "" }) {
     if (req.user.must_change_password) return res.redirect(302, "/change-password");
     return res.redirect(302, req.user.role === "client" ? "/portal" : "/app");
   }
+  res.setHeader("Cache-Control", "no-store");
   res.render("login", {
     title: `${mode === "client" ? "Client sign in" : "Agency sign in"} — ${product.name}`,
     tenant,

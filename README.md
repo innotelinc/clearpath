@@ -92,6 +92,32 @@ With no key, both surfaces say what to set and everything else keeps working —
 
 ---
 
+## Print and mail through Lob
+
+Certified letters can be printed, posted and tracked by Lob instead of being handed over by hand. Nothing changes until a key is set: without `LOB_API_KEY` every Lob button and column stays hidden and the mailroom keeps its print-and-post workflow.
+
+| Setting | Required | Purpose |
+| --- | --- | --- |
+| `LOB_API_KEY` | yes, to enable | `test_…` sends test letters (no tracking events, no postage), `live_…` posts real certified mail |
+| `LOB_WEBHOOK_SECRET` | recommended | Verifies the signature on delivery events; unset means `/webhooks/lob` accepts unsigned posts |
+| `LOB_BASE_URL` | no | Defaults to `https://api.lob.com/v1` |
+
+How it behaves:
+
+- **Send through Lob** on a ready package creates one certified First Class letter per dispute, using the bureau's address as the recipient and the agency's Settings address as the return address. Both must parse into street, city, state and ZIP or the send is refused with the reason.
+- Every response is stored in `mail_dispatches` (provider letter id, tracking number, expected delivery), the package moves to **In transit**, the disputes move to **Mailed**, and the exact letter bodies are snapshotted — so what was sent stays readable after a template changes.
+- The package page links the tracking number to the carrier and lists each delivery event.
+- `/webhooks/lob` is mounted before the session and CSRF pipeline because provider callbacks arrive unauthenticated. It verifies the signature when `LOB_WEBHOOK_SECRET` is set, records each event once, and moves the package through `mailed → in transit → delivered` (or `returned`).
+- A failing letter in a batch does not stop the rest: the ones that were accepted are recorded, the failures are reported in the flash notice, and the package keeps the tracking number of the first accepted letter.
+
+---
+
+## Billing
+
+`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are reserved for subscription billing and are read by no code path yet: Clearpath has no metering, invoicing or checkout to attach them to. Add the key when that feature exists rather than leaving a live key in a deployment that never calls Stripe.
+
+---
+
 ## What it does
 
 ### Agency workspace
@@ -102,7 +128,7 @@ With no key, both surfaces say what to set and everything else keeps working —
 | Clients | Search, stage filter, new-client intake, per-client case file with tradelines, disputes, documents, requests, messages and notes |
 | Disputes | Draft from a tradeline (bureau, account, theory, evidence strength), generate a letter with FCRA citations, track round, status, mailing date and response deadline |
 | Drafting studio | Pick a tradeline and a legal basis (§611 reinvestigation, §623 direct dispute, §605 obsolescence, Regulation V), review the evidence signals and confidence, edit the letter, then approve it into a dispute |
-| Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock. Opening a package shows exactly what was sent — the letter text is frozen at mailing time — and the tracking number links straight to the carrier |
+| Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock — or hand the package to Lob and let it print, post and report delivery. Opening a package shows exactly what was sent — the letter text is frozen at mailing time — and the tracking number links straight to the carrier |
 | Documents | Upload with signature verification and SHA-256 hashing, verify, download, request documents from a client, see what is outstanding |
 | Mail log | Owner-only: every invitation and reset email this workspace produced, delivery status, provider errors, manual retry |
 | Audit | Append-only SHA-256 chained log, chain verification, CSV export |
@@ -126,7 +152,7 @@ The app writes every message to an `emails` outbox first, then hands it to the c
 
 ### Drafting studio
 
-The studio is built in, not bolted on and not dependent on an API key. Letters are assembled by fixed rules from the tradeline, the evidence list, prior rounds and the bureau file: same input, same letter, no per-letter cost, and every sentence traceable to a field. The confidence figure is evidence strength, not a prediction of the outcome; the draft lists what the file supports and what is still thin. A specialist edits and approves it, which creates a normal dispute whose PDF uses the edited text. No language model is called anywhere in the product.
+The studio is built in, not bolted on and not dependent on an API key. Letters are assembled by fixed rules from the tradeline, the evidence list, prior rounds and the bureau file: same input, same letter, no per-letter cost, and every sentence traceable to a field. The confidence figure is evidence strength, not a prediction of the outcome; the draft lists what the file supports and what is still thin. A specialist edits and approves it, which creates a normal dispute whose PDF uses the edited text. Drafting itself never calls a model; the optional rewrite and case-summary actions are the only AI surfaces, and they are additive.
 
 ### PDFs
 
@@ -153,12 +179,14 @@ server/
   data.js         tenant-scoped queries
   uploads.js      multer config, file-signature sniffing, hashing
   pdf.js          letters, labels, manifests
-  util.js         formatting, product constants, PDF responses
-  routes/
+  util.js         formatting, product constants, PDF responses    lob.js        certified print-and-mail client (REST, Basic auth, no SDK)
+    routes/
     public.js     landing, legal, robots, contact form
     auth.js       sign-in, logout, forgot/reset, change-password
     admin.js      workspace routes
     portal.js     client portal routes
+    platform.js   operator console above the tenants
+    lob-webhook.js  unauthenticated delivery callbacks from Lob
 views/            EJS templates (partials for the three shells)
 public/           one stylesheet, one script, favicon — no third-party assets
 test/             node:test end-to-end suite
@@ -198,6 +226,8 @@ test/             node:test end-to-end suite
 | `MAIL_TRANSPORT` | auto | Force `resend`, `postmark`, `sendgrid` or `outbox` |
 | `MAIL_FROM` | `Clearpath <no-reply@denovocredit.com>` | Sender on a domain verified with your provider |
 | `MAIL_REPLY_TO` | unset | Optional reply address |
+| `LOB_API_KEY` / `LOB_WEBHOOK_SECRET` / `LOB_BASE_URL` | unset | Enables certified print-and-mail through Lob; see the Lob section above |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | unset | Reserved for billing; no code path uses them yet |
 
 Copy `.env.example` to `.env`: the app loads it on start (real environment variables take precedence) and Docker Compose uses it for interpolation.
 
@@ -231,7 +261,7 @@ npm test
 
 The suite spawns the real server on a temporary data directory and drives it over HTTP: health, marketing and legal pages, session requirements, failed and successful sign-in, role restrictions, host-based tenant routing, cross-tenant 404s, portal scoping, PDF magic bytes, the full intake → tradeline → dispute → package → mailed workflow, multipart upload (valid and spoofed), CSRF rejection, logout, invitation email → forced password change, a reset link working exactly once and dropping other sessions, studio draft → approved dispute with edited letter text, the mail log and its retry guard, and reset-request rate limiting.
 
-Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox), payment processing (there is none) or Docker image builds.
+Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox and stubs Lob against a local mock), payment processing (none exists) or Docker image builds.
 
 ---
 

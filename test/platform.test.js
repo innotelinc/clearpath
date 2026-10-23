@@ -140,6 +140,13 @@ test("a wrong platform password is rejected", async () => {
   assert.match(res.body, /do not match a platform account/);
 });
 
+test("workspace credentials on the operator form say to use the agency sign-in", async () => {
+  const { jar, res } = await platformSignIn("dana@denovocredit.com", "Denovo!2026");
+  assert.equal(res.status, 401);
+  assert.match(res.body, /workspace account, not an operator/);
+  assert.equal(jar.get("cp_platform"), undefined, "a rejected sign-in must not issue an operator cookie");
+});
+
 test("the operator sees every tenant with usage counts", async () => {
   const { jar, res } = await platformSignIn();
   assert.equal(res.status, 303);
@@ -336,4 +343,45 @@ test("a mailed package stores what was sent and links the tracking number", asyn
   assert.equal(list.status, 200);
   assert.match(list.body, /Track/);
   assert.match(list.body, /9405 5118 9956 0000 0000 42/);
+});
+
+test("an operator can sign in while an agency session is open in the same browser", async () => {
+  const { jar } = await agencySignIn();
+  const page = await http("/platform/login", { jar });
+  assert.equal(page.status, 200);
+
+  const res = await http("/platform/login", {
+    method: "POST",
+    jar,
+    form: {
+      _csrf: jar.get("cp_csrf"),
+      email: "platform@clearpath.test",
+      password: "Platform!2026",
+      next: "/platform"
+    }
+  });
+  assert.equal(res.status, 303);
+  assert.equal(res.location, "/platform");
+
+  const list = await http("/platform", { jar });
+  assert.equal(list.status, 200, "the operator session must win over the agency cookie on /platform");
+  assert.match(list.body, /Tenant list/);
+
+  // The workspace session is untouched by signing in as an operator.
+  const workspace = await http("/app", { jar });
+  assert.equal(workspace.status, 200);
+});
+
+test("sending through Lob is refused with a clear message while it is disabled", async () => {
+  const { jar } = await agencySignIn();
+  const pkg = db.prepare("SELECT * FROM packages WHERE status = 'Ready' ORDER BY id LIMIT 1").get();
+  assert.ok(pkg, "a ready package exists");
+
+  const res = await http(`/app/mailroom/${pkg.id}/send`, {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf") }
+  });
+  assert.equal(res.status, 303);
+  assert.match(decodeURIComponent(res.location), /Lob is not enabled yet/);
 });

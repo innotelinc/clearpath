@@ -277,6 +277,35 @@ CREATE TABLE IF NOT EXISTS package_letters (
   UNIQUE (package_id, dispute_id)
 );
 
+/* One row per physical letter handed to a print-and-mail provider. */
+CREATE TABLE IF NOT EXISTS mail_dispatches (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  dispute_id INTEGER REFERENCES disputes(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL DEFAULT 'lob',
+  provider_letter_id TEXT NOT NULL,
+  tracking TEXT,
+  expected_delivery TEXT,
+  status TEXT NOT NULL DEFAULT 'created',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (provider, provider_letter_id)
+);
+
+/* Provider webhook events, kept as the delivery audit trail. */
+CREATE TABLE IF NOT EXISTS package_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  package_id INTEGER REFERENCES packages(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  provider_event_id TEXT,
+  event TEXT NOT NULL,
+  detail TEXT,
+  occurred_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS case_insights (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -300,6 +329,9 @@ CREATE INDEX IF NOT EXISTS idx_drafts_tenant ON drafts (tenant_id, id);
 CREATE INDEX IF NOT EXISTS idx_platform_sessions_expiry ON platform_sessions (expires_at);
 CREATE INDEX IF NOT EXISTS idx_insights_client ON case_insights (tenant_id, client_id, id);
 CREATE INDEX IF NOT EXISTS idx_package_letters ON package_letters (tenant_id, package_id);
+CREATE INDEX IF NOT EXISTS idx_dispatches_package ON mail_dispatches (tenant_id, package_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_package_events_dedupe ON package_events (provider, provider_event_id);
+CREATE INDEX IF NOT EXISTS idx_package_events_package ON package_events (package_id, id);
 `;
 
 db.exec(schema);

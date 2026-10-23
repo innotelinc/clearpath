@@ -11,11 +11,11 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 | --- | --- |
 | App | Express 4 + EJS 3 + `node:sqlite`, no build step, no client framework |
 | Node | 22.5+ (uses `node:sqlite`; currently verified on 22.23.3) |
-| Tests | `npm test` — 33 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive) |
+| Tests | `npm test` — 39 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive, Lob send + webhook) |
 | Dev server | `PORT=3400 DATA_DIR=./data node server/index.js` (log: `.server.log`) |
 | Production entry | `Dockerfile` + `docker-compose.yml` (image not built here: no Docker on this machine) |
 | Git | branch `main`, pushed to `https://github.com/innotelinc/clearpath` (public) |
-| Latest commit | `940cd72` — provisioning/recovery + drafting studio (this handoff update follows it) |
+| Latest commit | see `git log -1` — Lob print-and-mail, Docker packaging, operator sign-in fix |
 
 Demo sign-ins: `dana@denovocredit.com` / `Denovo!2026` (owner), `marcus@denovocredit.com` /
 `Specialist!2026`, `amara@example.com` / `Client!2026` (portal).
@@ -39,8 +39,21 @@ A previous cloud session that built the platform console did not survive, so it 
 Gotcha worth remembering: `client` is a reserved EJS compiler option, so a view local with that
 name breaks `include()` — pass client records as `clientRecord` (see `views/admin/client.ejs`).
 
-No postal-mail vendor is integrated. Outbound *email* uses Resend / Postmark / SendGrid when one of
-their keys is set; physical certified mail is still printed and posted by hand.
+Outbound *email* uses Resend / Postmark / SendGrid when one of their keys is set. Physical certified
+mail is still printed and posted by hand unless Lob is enabled (below).
+
+---
+
+## 2026-10-23 — Lob print-and-mail, Docker, operator sign-in
+
+| Area | What changed |
+| --- | --- |
+| Lob | `server/lob.js` — plain REST, API key as Basic auth, `extra_service: certified`, `test_`/`live_` mode detection, HTML letter built from the drafter's text. Enabled only by `LOB_API_KEY`; every Lob surface hides without it. |
+| Webhook | `server/routes/lob-webhook.js` mounted at `/webhooks/lob` before the cookie pipeline, raw body, HMAC signature check when `LOB_WEBHOOK_SECRET` is set, events recorded once in `mail_dispatches.events`, package walks `mailed → in transit → delivered/returned`. |
+| Mailroom | **Send through Lob** on a ready package posts one certified letter per dispute, stores the provider letter id, tracking and expected delivery, snapshots the bodies, and reports partial failures without losing the successes. |
+| Docker | `Dockerfile` (multi-stage, non-root, `/data` volume, health check) and `docker-compose.yml` pass through the Lob and OmniRoute settings. Not built here: this machine has no Docker binary. |
+| Operator sign-in | A browser holding an agency session used to mask the platform cookie, so `/platform` bounced to its login. `attachSession` now resolves both sessions independently. Failed operator sign-ins log why, and workspace credentials typed into the operator form say so instead of showing a generic error. Login pages send `Cache-Control: no-store`. |
+| Stripe | `STRIPE_SECRET_KEY` is wired through Compose and documented, but **no code path spends it** — there is no billing feature yet. |
 
 ---
 
@@ -121,6 +134,9 @@ MAIL_FROM="Denovo Credit <no-reply@denovocredit.com>"   # verified domain
 RESEND_API_KEY=…        # or POSTMARK_TOKEN / SENDGRID_API_KEY
 SEED_DEMO=0
 COOKIE_SECURE=1
+PLATFORM_ADMIN_EMAIL=…  PLATFORM_ADMIN_PASSWORD=…   # replaces the demo operator
+LOB_API_KEY=live_…      LOB_WEBHOOK_SECRET=…       # when certified mail should post itself
+OMNIROUTE_API_KEY=…                                # the only AI gateway
 ```
 
 `.env` is read on boot (see `server/env.js`); Docker Compose reads the same file for
@@ -149,6 +165,10 @@ interpolation and passes the mail variables through explicitly.
   The mailer is now in place, so adding a "notify" template is small.
 - **Docker image unverified** on this machine (no Docker CLI). `docker compose up --build`
   is the first thing to run somewhere with Docker.
+- **Lob webhooks need a public URL** — exposing `/webhooks/lob` (a tunnel in development, a
+  real host in production) is required before delivery events can reach the app.
+- **Stripe is wired but unused** — no billing feature exists, so `STRIPE_SECRET_KEY` sits in
+  Compose and is read by nothing.
 - Office/PDF: label sheet assumes a standard envelope sheet; check against the printer in use.
 
 ---
@@ -159,7 +179,7 @@ interpolation and passes the mail variables through explicitly.
 cd clearpath
 npm install
 npm run check        # node --check on the server entry points
-npm test             # 25 tests, spawned server, temporary database
+npm test             # 39 tests, spawned server, temporary database
 npm run seed         # inspect seeded tenants/users
 PORT=3400 npm start  # http://localhost:3400
 ```

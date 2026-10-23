@@ -20,10 +20,18 @@
   <div class="page-actions">
     <a class="btn" href="/app/mailroom">Mailroom</a>
     <% if (pkg.status === "Ready") { %>
-      <form method="post" action="/app/mailroom/<%= pkg.id %>/mailed" data-confirm="Mark <%= pkg.ref %> mailed? The letter text is stored on the package and the 30-day clock starts.">
+      <% if (lobConfigured) { %>
+        <form method="post" action="/app/mailroom/<%= pkg.id %>/send" data-confirm="Send <%= pkg.letters %> certified letter<%= pkg.letters === 1 ? '' : 's' %> through Lob? This spends real postage<%= lobMode === 'test' ? ' in test mode (no real mail)' : '' %>.">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button class="btn btn-primary" type="submit" data-busy-label="Sending…">
+            <svg><use href="#i-send"/></svg>Send via Lob<%= lobMode === 'test' ? ' (test)' : '' %>
+          </button>
+        </form>
+      <% } %>
+      <form method="post" action="/app/mailroom/<%= pkg.id %>/mailed" data-confirm="Mark <%= pkg.ref %> mailed by hand? The letter text is stored on the package and the 30-day clock starts.">
         <input type="hidden" name="_csrf" value="<%= csrf %>">
         <input type="hidden" name="tracking" value="<%= pkg.tracking || "" %>">
-        <button class="btn btn-primary" type="submit">Mark mailed</button>
+        <button class="btn" type="submit">Mark mailed by hand</button>
       </form>
     <% } %>
   </div>
@@ -63,6 +71,57 @@
     <div class="kpi-meta"><%= pkg.method %></div>
   </div>
 </div>
+
+<% if (dispatches.length) { %>
+  <section class="card" style="margin-top:20px">
+    <div class="card-head">
+      <div>
+        <h2>Dispatch</h2>
+        <p>Handed to Lob for printing and certified postage</p>
+      </div>
+      <span class="badge <%= lobMode === 'live' ? 'teal' : 'gray' %> no-dot"><%= lobMode === 'live' ? 'Lob live' : 'Lob test' %></span>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Letter</th><th>Lob id</th><th>Tracking</th><th>Expected</th><th>Status</th></tr></thead>
+        <tbody>
+          <% dispatches.forEach((dispatch) => { %>
+            <tr>
+              <td class="mono">#<%= dispatch.dispute_id %></td>
+              <td class="mono tiny"><%= dispatch.provider_letter_id %></td>
+              <td class="small">
+                <% if (dispatch.tracking) { %>
+                  <a class="mono" href="<%= trackingUrl(dispatch.tracking) %>" target="_blank" rel="noopener"><%= dispatch.tracking %></a>
+                <% } else { %>
+                  <span class="muted">Assigned by USPS after printing</span>
+                <% } %>
+              </td>
+              <td class="tiny muted"><%= dispatch.expected_delivery ? fmtDate(dispatch.expected_delivery) : "—" %></td>
+              <td><span class="badge <%= statusClass(dispatch.status) %> no-dot"><%= dispatch.status %></span></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% if (events.length) { %>
+      <div class="card-body" style="border-top:1px solid var(--line)">
+        <h3 class="tiny" style="text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);margin:0 0 8px">Delivery events</h3>
+        <div class="feed">
+          <% events.forEach((event) => { %>
+            <div class="feed-row">
+              <span class="feed-dot" style="background:var(--teal)"></span>
+              <div class="body">
+                <strong><%= event.event %></strong><br>
+                <%= event.detail || "No detail from the carrier." %>
+                <time><%= fmtDateTime(event.occurred_at) %></time>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      </div>
+    <% } %>
+  </section>
+<% } %>
 
 <section class="card" style="margin-top:20px">
   <div class="card-head">
@@ -106,6 +165,14 @@
           </div>
         </details>
       <% }) %>
+    </div>
+  <% } %>
+  <% if (!lobConfigured) { %>
+    <div class="card-foot">
+      <p class="tiny muted" style="margin:0">
+        Set <code>LOB_API_KEY</code> to print and post packages through Lob, with certified tracking and delivery events.
+        Until then, print the packet and mark it mailed by hand.
+      </p>
     </div>
   <% } %>
 </section>

@@ -13,6 +13,8 @@ import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
 import portalRoutes from "./routes/portal.js";
 import platformRoutes from "./routes/platform.js";
+import lobWebhookRoutes from "./routes/lob-webhook.js";
+import { lobConfigured, lobMode, lobWebhookSecret } from "./lob.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -20,6 +22,13 @@ const root = path.resolve(here, "..");
 if (process.env.SEED_DEMO !== "0") {
   const seeded = seedDemo();
   if (seeded) console.log("Clearpath: seeded demo tenants and records");
+}
+
+if (lobConfigured) {
+  console.log(`Clearpath: Lob print-and-mail enabled in ${lobMode} mode`);
+  if (!lobWebhookSecret) {
+    console.warn("Clearpath: LOB_WEBHOOK_SECRET is not set, so /webhooks/lob accepts unsigned delivery events");
+  }
 }
 
 const platformAdmin = ensurePlatformAdmin();
@@ -78,6 +87,11 @@ app.get("/healthz", (req, res) => {
     res.status(503).json({ ok: false, error: "database unavailable" });
   }
 });
+
+// Provider webhooks arrive without a session or CSRF token, so they are parsed
+// raw (the signature covers the exact bytes) and mounted before the app's
+// cookie-authenticated pipeline.
+app.use("/webhooks", express.raw({ type: "application/json", limit: "1mb" }), lobWebhookRoutes);
 
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));

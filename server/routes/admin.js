@@ -8,7 +8,8 @@ import { hashPassword, verifyPassword, strongEnough } from "../security.js";
 import { createAccount, emailDeliveryNote, sendCredentials, sendResetLink } from "../accounts.js";
 import { deliver, mailConfigured, mailStatus } from "../mail.js";
 import { STRATEGIES, TONES, generateDraft, getDraft, listDrafts, parseList } from "../studio.js";
-import { letterPdf, letterText, labelsPdf, queuePdf } from "../pdf.js";
+import { BUREAUS, letterPdf, letterText, labelsPdf, queuePdf } from "../pdf.js";
+import { createCertifiedLetter, lobConfigured, lobMode, parseAddress } from "../lob.js";
 import {
   allRequests, clientDisputes, clientDocuments, clientMessages, clientPackages, clientRequests,
   clientTradelines, clientsMap, getClient, getDispute, getDocument, listClients, listDisputes,
@@ -32,6 +33,32 @@ function fail(res, status, title, message) {
 }
 
 const STATUSES = ["Needs review", "Queued", "Mailed", "Awaiting response", "Escalated", "Deleted", "Closed"];
+
+/** Freeze the exact printed text of the letters in a package. */
+function captureLetters(tenant, pkg, letterIds, t) {
+  const snapshot = db.prepare(
+    "INSERT OR IGNORE INTO package_letters (tenant_id, package_id, dispute_id, ref, account, bureau, body) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  letterIds.forEach((id) => {
+    const full = getDispute(t, id);
+    if (!full) return;
+    const tradeline = {
+      creditor: full.creditor || String(full.account).split("••")[0].trim(),
+      mask: full.mask || (String(full.account).split("••")[1] || "").trim(),
+      type: full.tradeline_type || "Collection",
+      balance: full.balance || 0,
+      reason: full.issue,
+      evidence: full.evidence || "[]"
+    };
+    const body = letterText({
+      tenant,
+      client: { name: full.client_name, email: full.client_email, phone: full.client_phone },
+      dispute: full,
+      tradeline
+    });
+    snapshot.run(t, pkg.id, full.id, full.ref, full.account, full.bureau, body);
+  });
+}
 
 router.get("/", (req, res) => {
   const t = tenantId(req);
@@ -417,28 +444,7 @@ router.post("/mailroom/:id/mailed", (req, res) => {
   }
 
   // Freeze what was actually posted. Disputes keep evolving; this cannot.
-  const snapshot = db.prepare(
-    "INSERT OR IGNORE INTO package_letters (tenant_id, package_id, dispute_id, ref, account, bureau, body) VALUES (?, ?, ?, ?, ?, ?, ?)"
-  );
-  letterIds.forEach((id) => {
-    const full = getDispute(t, id);
-    if (!full) return;
-    const tradeline = {
-      creditor: full.creditor || String(full.account).split("••")[0].trim(),
-      mask: full.mask || (String(full.account).split("••")[1] || "").trim(),
-      type: full.tradeline_type || "Collection",
-      balance: full.balance || 0,
-      reason: full.issue,
-      evidence: full.evidence || "[]"
-    };
-    const body = letterText({
-      tenant: req.tenant,
-      client: { name: full.client_name, email: full.client_email, phone: full.client_phone },
-      dispute: full,
-      tradeline
-    });
-    snapshot.run(t, pkg.id, full.id, full.ref, full.account, full.bureau, body);
-  });
+  captureLetters(req.tenant, pkg, letterIds, t);
 
   audit(t, actor(req), "Mailed package", `${pkg.ref}${tracking ? " · " + tracking : ""}`);
   back(res, "/app/mailroom", { notice: `${pkg.ref} marked in transit. What was sent is stored on the package.` });
@@ -490,6 +496,108 @@ router.get("/mailroom/queue.pdf", (req, res) => {
   sendPdf(res, "clearpath-mailing-queue.pdf", queuePdf(req.tenant, ready, withInput, map));
 });
 
+/* Hand the package to Lob: print, postage and certified mail in one call. */
+router.post("/mailroom/:id/send", async (req, res) => {
+  const t = tenantId(req);
+  const pkg = db.prepare("SELECT * FROM packages WHERE id = ? AND tenant_id = ?").get(Number(req.params.id), t);
+  if (!pkg) return fail(res, 404, "Package not found", "That package is not in this workspace.");
+  const target = `/app/mailroom/${pkg.id}`;
+
+  if (!lobConfigured) {
+    return back(res, target, {
+      error: "Lob is not enabled yet. Set LOB_API_KEY (and LOB_WEBHOOK_SECRET) and restart, or mark the package mailed by hand."
+    });
+  }
+  if (pkg.status !== "Ready") {
+    return back(res, target, { error: "Only a package that is still ready can be sent through Lob." });
+  }
+
+  const from = parseAddress(req.tenant.address, req.tenant.brand_name || req.tenant.name);
+  if (!from) {
+    return back(res, target, {
+      error: "Add the agency's full mailing address in Settings first — Lob needs a return address with city, state and ZIP."
+    });
+  }
+
+  const items = db.prepare("SELECT dispute_id FROM package_items WHERE package_id = ?").all(pkg.id);
+  let letterIds = items.map((item) => item.dispute_id).filter(Boolean);
+  if (!letterIds.length) {
+    letterIds = db
+      .prepare(
+        "SELECT id FROM disputes WHERE tenant_id = ? AND client_id = ? AND bureau = ? AND status IN ('Needs review','Queued')"
+      )
+      .all(t, pkg.client_id, pkg.bureau)
+      .map((row) => row.id);
+  }
+  if (!letterIds.length) return back(res, target, { error: "This package has no letters to send." });
+
+  const sent = [];
+  const problems = [];
+  for (const id of letterIds) {
+    const full = getDispute(t, id);
+    if (!full) continue;
+    const bureauEntry = BUREAUS[full.bureau] || BUREAUS.tu;
+    const to = parseAddress(bureauEntry.address, bureauEntry.name);
+    if (!to) {
+      problems.push(`${full.ref}: the bureau address could not be read`);
+      continue;
+    }
+    const tradeline = {
+      creditor: full.creditor || String(full.account).split("••")[0].trim(),
+      mask: full.mask || (String(full.account).split("••")[1] || "").trim(),
+      type: full.tradeline_type || "Collection",
+      balance: full.balance || 0,
+      reason: full.issue,
+      evidence: full.evidence || "[]"
+    };
+    const body = letterText({
+      tenant: req.tenant,
+      client: { name: full.client_name, email: full.client_email, phone: full.client_phone },
+      dispute: full,
+      tradeline
+    });
+    try {
+      const letter = await createCertifiedLetter({
+        to,
+        from,
+        text: body,
+        description: `${pkg.ref} · ${full.ref}`,
+        metadata: { tenant: req.tenant.slug, package: pkg.ref, dispute: full.ref }
+      });
+      db.prepare(
+        `INSERT OR IGNORE INTO mail_dispatches (tenant_id, package_id, dispute_id, provider, provider_letter_id, tracking, expected_delivery, status)
+         VALUES (?, ?, ?, 'lob', ?, ?, ?, 'created')`
+      ).run(t, pkg.id, full.id, letter.id, letter.tracking || null, letter.expectedDelivery || null);
+      sent.push({ ...letter, disputeId: full.id, ref: full.ref });
+    } catch (err) {
+      problems.push(`${full.ref}: ${err.message}`);
+    }
+  }
+
+  if (!sent.length) {
+    return back(res, target, { error: problems[0] || "Lob did not accept any letter in this package." });
+  }
+
+  const tracking = sent.find((letter) => letter.tracking)?.tracking || null;
+  const sentAt = new Date().toISOString();
+  db.prepare("UPDATE packages SET status = 'In transit', tracking = ?, sent_at = ? WHERE id = ? AND tenant_id = ?").run(
+    tracking,
+    sentAt,
+    pkg.id,
+    t
+  );
+  const mailed = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const mark = db.prepare("UPDATE disputes SET status = 'Mailed', mailed = ? WHERE id = ? AND tenant_id = ?");
+  sent.forEach((letter) => mark.run(mailed, letter.disputeId, t));
+  captureLetters(req.tenant, pkg, sent.map((letter) => letter.disputeId), t);
+
+  audit(t, actor(req), "Sent package through Lob", `${pkg.ref} · ${sent.length} certified letter(s)`);
+  const partial = problems.length ? ` ${problems.length} letter(s) failed: ${problems.join("; ")}` : "";
+  back(res, target, {
+    notice: `${pkg.ref} handed to Lob — ${sent.length} certified letter(s)${lobMode === "test" ? " in test mode" : ""}.${partial}`
+  });
+});
+
 router.get("/mailroom/:id", (req, res) => {
   const t = tenantId(req);
   const pkg = db.prepare("SELECT * FROM packages WHERE id = ? AND tenant_id = ?").get(Number(req.params.id), t);
@@ -510,6 +618,13 @@ router.get("/mailroom/:id", (req, res) => {
       .all(pkg.id, t);
   }
 
+  const dispatches = db
+    .prepare("SELECT * FROM mail_dispatches WHERE tenant_id = ? AND package_id = ? ORDER BY id")
+    .all(t, pkg.id);
+  const events = db
+    .prepare("SELECT * FROM package_events WHERE tenant_id = ? AND package_id = ? ORDER BY id DESC LIMIT 25")
+    .all(t, pkg.id);
+
   res.render("admin/package", {
     title: pkg.ref,
     page: "mailroom",
@@ -517,7 +632,11 @@ router.get("/mailroom/:id", (req, res) => {
     // `client` is reserved as an EJS compiler option — the view needs another name.
     clientRecord: client,
     letters,
-    snapshot: letters.length > 0 && Boolean(letters[0].captured_at)
+    snapshot: letters.length > 0 && Boolean(letters[0].captured_at),
+    dispatches,
+    events,
+    lobConfigured,
+    lobMode
   });
 });
 

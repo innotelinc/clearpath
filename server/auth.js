@@ -100,21 +100,26 @@ export function attachSession(req, res, next) {
       db.prepare("DELETE FROM sessions WHERE id = ?").run(row.session_id);
       if (row.tenant_status === "suspended") res.locals.suspendedTenant = row.tenant_name;
     }
+  }  // A browser can legitimately hold both a workspace session and a platform
+  // session. Load the operator session either way — otherwise an agency cookie
+  // in the same browser bounces /platform back to its sign-in page.
+  const platform = findPlatformSession(req.cookies[PLATFORM_COOKIE]);
+  if (platform) {
+    req.platformAdmin = platform.admin;
+    res.locals.platformAdmin = platform.admin;
   }
 
-  let platformCsrf = "";
-  if (!req.user) {
-    const platform = findPlatformSession(req.cookies[PLATFORM_COOKIE]);
-    if (platform) {
-      req.platformAdmin = platform.admin;
-      res.locals.platformAdmin = platform.admin;
-      platformCsrf = platform.csrf;
-    }
-  }
+  // The page being rendered decides whose CSRF token the forms carry.
+  const onPlatform = req.path === "/platform" || req.path.startsWith("/platform/");
+  const desired =
+    onPlatform && platform
+      ? platform.csrf
+      : req.session
+        ? req.session.csrf
+        : platform
+          ? platform.csrf
+          : req.cookies[CSRF_COOKIE] || randomToken(24);
 
-  const desired = req.session
-    ? req.session.csrf
-    : platformCsrf || req.cookies[CSRF_COOKIE] || randomToken(24);
   if (req.cookies[CSRF_COOKIE] !== desired) {
     const existing = res.getHeader("Set-Cookie");
     const list = existing ? (Array.isArray(existing) ? existing : [existing]) : [];
