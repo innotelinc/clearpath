@@ -29,6 +29,7 @@ services:
       LOB_API_KEY: ${LOB_API_KEY:-}
       LOB_WEBHOOK_SECRET: ${LOB_WEBHOOK_SECRET:-}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     volumes:
       - clearpath-data:/data
     healthcheck:

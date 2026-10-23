@@ -1,0 +1,151 @@
+<%- include("../partials/platform-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Payments</h1>
+    <p>The Stripe account every workspace bills through. Keys set here win over the environment and take effect immediately.</p>
+  </div>
+  <div class="page-actions">
+    <% if (!configured) { %>
+      <span class="badge gray">Not configured</span>
+    <% } else if (mode === "live") { %>
+      <span class="badge rose">Live mode</span>
+    <% } else if (mode === "test") { %>
+      <span class="badge blue">Test mode</span>
+    <% } else { %>
+      <span class="badge amber">Unrecognised key</span>
+    <% } %>
+  </div>
+</div>
+
+<div class="dash-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Stripe keys</h2><p>Stored in this deployment's database, shown only as a mask</p></div>
+        <form method="post" action="/platform/billing/test">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button class="btn btn-sm" type="submit" <%= configured ? "" : "disabled" %>>
+            <svg><use href="#i-shield"/></svg>Check connection
+          </button>
+        </form>
+      </div>
+      <form class="card-body stack" method="post" action="/platform/billing" autocomplete="off">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <dl class="def-list">
+          <div>
+            <dt>Secret key</dt>
+            <dd class="mono tiny"><%= configured ? secretMask : "not set" %></dd>
+          </div>
+          <div>
+            <dt>Source</dt>
+            <dd>
+              <%= source === "console" ? "Platform console" : source === "environment" ? "Environment variable" : "—" %>
+              <% if (source === "console" && secretFromEnv) { %><span class="tiny muted"> · overrides STRIPE_SECRET_KEY</span><% } %>
+            </dd>
+          </div>
+          <div>
+            <dt>Webhook secret</dt>
+            <dd class="mono tiny"><%= webhookMask || "not set" %></dd>
+          </div>
+        </dl>
+
+        <div class="field">
+          <label for="secret_key">Replace secret key</label>
+          <input class="input mono" id="secret_key" name="secret_key" type="password" spellcheck="false"
+                 placeholder="sk_live_… or sk_test_…">
+          <span class="hint">Leave empty to keep the current key. Pasted keys are never echoed back.</span>
+        </div>
+        <div class="field">
+          <label for="webhook_secret">Replace webhook signing secret</label>
+          <input class="input mono" id="webhook_secret" name="webhook_secret" type="password" spellcheck="false"
+                 placeholder="whsec_…">
+          <span class="hint">Required for <code>/webhooks/stripe</code> to accept events; without it billing status freezes.</span>
+        </div>
+        <label class="row tiny" style="gap:8px;align-items:center">
+          <input type="checkbox" name="clear_stored" value="1">
+          Remove the stored keys and fall back to the environment variables
+        </label>
+        <div class="row" style="gap:8px">
+          <button class="btn btn-primary" type="submit">Save keys</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Webhook endpoint</h2><p>Where Stripe reports subscription changes</p></div></div>
+      <div class="card-body stack">
+        <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">
+          <code class="mono"><%= webhookUrl %></code>
+          <button class="btn btn-sm" type="button" data-copy="<%= webhookUrl %>">Copy</button>
+        </div>
+        <p class="tiny muted">
+          In Stripe → Developers → Webhooks, add that URL and subscribe to
+          <code>checkout.session.completed</code>, <code>customer.subscription.created</code>,
+          <code>customer.subscription.updated</code>, <code>customer.subscription.deleted</code>,
+          <code>invoice.paid</code> and <code>invoice.payment_failed</code>. Copy the endpoint's signing
+          secret into the field above — the endpoint refuses unsigned posts.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <% if (result) { %>
+      <section class="card">
+        <div class="card-head"><div><h2>Key check</h2><p>Stripe's answer, moments ago</p></div></div>
+        <div class="card-body">
+          <dl class="def-list">
+            <div><dt>Mode</dt><dd><%= result.livemode ? "Live" : "Test" %></dd></div>
+            <div><dt>Key type</dt><dd class="mono"><%= result.mode %></dd></div>
+            <div><dt>Round trip</dt><dd><%= result.ms %> ms</dd></div>
+            <div>
+              <dt>Balance</dt>
+              <dd>
+                <% if (!result.currencies.length) { %>—<% } %>
+                <% result.currencies.forEach((entry) => { %>
+                  <%= money(entry.amount / 100) %> <%= entry.currency.toUpperCase() %>
+                <% }) %>
+              </dd>
+            </div>
+          </dl>
+          <p class="tiny muted" style="margin-top:10px">
+            This reads <code>/v1/balance</code> only: nothing is created, charged or changed.
+          </p>
+        </div>
+      </section>
+    <% } %>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Published plans</h2><p>What a workspace can subscribe to</p></div></div>
+      <div class="card-body stack" style="gap:12px">
+        <% plans.forEach((plan) => { %>
+          <div class="row" style="justify-content:space-between;align-items:baseline;gap:10px">
+            <div>
+              <strong><%= plan.name %></strong>
+              <div class="tiny muted">
+                <%= plan.clients ? `${plan.clients} clients` : "Unlimited clients" %> ·
+                <%= plan.staff ? `${plan.staff} seats` : "Unlimited seats" %>
+              </div>
+            </div>
+            <span class="mono"><%= money(plan.amount / 100) %>/mo</span>
+          </div>
+        <% }) %>
+        <p class="tiny muted">
+          Prices are defined in <code>server/billing.js</code> and sent to Stripe as inline price data, so no
+          dashboard products or price ids are needed.
+        </p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Fallback</h2><p>If the console is unavailable</p></div></div>
+      <div class="card-body tiny muted stack" style="gap:8px">
+        <p>Set <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> in the deployment environment and restart. The console wins whenever a key is stored.</p>
+        <p><code>STRIPE_BASE_URL</code> exists for tests and for a Stripe-compatible mock; leave it unset for the real API.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/platform-foot") %>

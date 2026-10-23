@@ -11,11 +11,11 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 | --- | --- |
 | App | Express 4 + EJS 3 + `node:sqlite`, no build step, no client framework |
 | Node | 22.5+ (uses `node:sqlite`; currently verified on 22.23.3) |
-| Tests | `npm test` — 39 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive, Lob send + webhook) |
+| Tests | `npm test` — 45 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive, Lob send + webhook, Stripe billing against a mock) |
 | Dev server | `PORT=3400 DATA_DIR=./data node server/index.js` (log: `.server.log`) |
 | Production entry | `Dockerfile` + `docker-compose.yml` (image not built here: no Docker on this machine) |
 | Git | branch `main`, pushed to `https://github.com/innotelinc/clearpath` (public) |
-| Latest commit | see `git log -1` — Lob print-and-mail, Docker packaging, operator sign-in fix |
+| Latest commit | see `git log -1` — Stripe billing, operator payments page, README credentials |
 
 Demo sign-ins: `dana@denovocredit.com` / `Denovo!2026` (owner), `marcus@denovocredit.com` /
 `Specialist!2026`, `amara@example.com` / `Client!2026` (portal).
@@ -53,7 +53,22 @@ mail is still printed and posted by hand unless Lob is enabled (below).
 | Mailroom | **Send through Lob** on a ready package posts one certified letter per dispute, stores the provider letter id, tracking and expected delivery, snapshots the bodies, and reports partial failures without losing the successes. |
 | Docker | `Dockerfile` (multi-stage, non-root, `/data` volume, health check) and `docker-compose.yml` pass through the Lob and OmniRoute settings. Not built here: this machine has no Docker binary. |
 | Operator sign-in | A browser holding an agency session used to mask the platform cookie, so `/platform` bounced to its login. `attachSession` now resolves both sessions independently. Failed operator sign-ins log why, and workspace credentials typed into the operator form say so instead of showing a generic error. Login pages send `Cache-Control: no-store`. |
-| Stripe | `STRIPE_SECRET_KEY` is wired through Compose and documented, but **no code path spends it** — there is no billing feature yet. |
+| Stripe | Superseded by the billing section below: the key is now spent by real checkout and webhook code. |
+
+---
+
+## 2026-10-23 — Stripe billing, operator payments page
+
+| Area | What changed |
+| --- | --- |
+| Plans | `server/billing.js` — Starter $149 / Growth $399 / Scale $799 a month, sent to Stripe as inline `price_data`, so no dashboard products or price ids are needed. |
+| Checkout | `/app/billing` (owner only) → `POST /app/billing/checkout` creates a subscription Checkout Session and redirects to Stripe. The success redirect fetches the session back and syncs it, which makes the flow work without a public webhook. |
+| Webhook | `POST /webhooks/stripe` — signature mandatory (`503` without `STRIPE_WEBHOOK_SECRET`), HMAC over `<t>.<body>`, deduped by event id in `billing_events`. Handles checkout completed, subscription created/updated/deleted, invoice paid/failed. |
+| Schema | `tenants.plan`, `plan_status`, `plan_renews_at`, `plan_updated_at`, `stripe_customer_id`, `stripe_subscription_id`, `billing_email`; new `billing_events` and `platform_settings`. Additive via `ensureColumn`; the customer-id index is created after the migration because the schema block runs first. |
+| Operator payments | `/platform/billing` — store or replace the secret key and webhook secret (masked, console wins over env), clear them, and **Check connection** (`GET /v1/balance`, read-only) reporting mode and latency. Keys are validated on save. |
+| Console | Tenant list gained a Plan column; the tenant page gained a Billing card. |
+| Portal | **Manage payment** opens the Stripe billing portal for cards, invoices and cancellation. |
+| Failure modes | No key: the billing page says who fixes it and checkout is disabled. Bad key: Stripe's message is shown, not swallowed. No webhook secret: boot warns and the endpoint refuses events. A failed payment shows a banner and leaves the workspace usable. |
 
 ---
 
@@ -135,6 +150,7 @@ RESEND_API_KEY=…        # or POSTMARK_TOKEN / SENDGRID_API_KEY
 SEED_DEMO=0
 COOKIE_SECURE=1
 PLATFORM_ADMIN_EMAIL=…  PLATFORM_ADMIN_PASSWORD=…   # replaces the demo operator
+STRIPE_SECRET_KEY=sk_live_…  STRIPE_WEBHOOK_SECRET=whsec_…   # or store both in /platform/billing
 LOB_API_KEY=live_…      LOB_WEBHOOK_SECRET=…       # when certified mail should post itself
 OMNIROUTE_API_KEY=…                                # the only AI gateway
 ```
@@ -167,8 +183,9 @@ interpolation and passes the mail variables through explicitly.
   is the first thing to run somewhere with Docker.
 - **Lob webhooks need a public URL** — exposing `/webhooks/lob` (a tunnel in development, a
   real host in production) is required before delivery events can reach the app.
-- **Stripe is wired but unused** — no billing feature exists, so `STRIPE_SECRET_KEY` sits in
-  Compose and is read by nothing.
+- **Stripe billing is untested against the real API** — the suite runs against a local mock and the
+  live key was only checked with the read-only `/v1/balance` call. Run one real subscription
+  (test mode first) before charging anyone.
 - Office/PDF: label sheet assumes a standard envelope sheet; check against the printer in use.
 
 ---
@@ -179,7 +196,7 @@ interpolation and passes the mail variables through explicitly.
 cd clearpath
 npm install
 npm run check        # node --check on the server entry points
-npm test             # 39 tests, spawned server, temporary database
+npm test             # 45 tests, spawned servers, temporary databases
 npm run seed         # inspect seeded tenants/users
 PORT=3400 npm start  # http://localhost:3400
 ```

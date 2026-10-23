@@ -24,7 +24,7 @@ Requires **Node 22.5+** (uses the built-in `node:sqlite` module — no native bu
 
 ```bash
 npm run dev          # restart on change
-npm test             # 25 end-to-end tests against a spawned server
+npm test             # 45 end-to-end tests against spawned servers
 npm run seed         # seed an empty database, or inspect what exists
 npm run seed -- --reset   # wipe local data and reseed (refuses in production)
 ```
@@ -37,6 +37,18 @@ npm run seed -- --reset   # wipe local data and reseed (refuses in production)
 | Denovo Credit | Specialist | `marcus@denovocredit.com` | `Specialist!2026` |
 | Denovo Credit | Client (portal) | `amara@example.com` | `Client!2026` |
 | Northstar Credit Group | Owner | `owner@northstar.test` | `Northstar!2026` |
+| Platform (operator console) | Operator | `platform@clearpath.test` | `Platform!2026` |
+
+**Platform operator sign-in:** <http://localhost:3000/platform/login> —
+`platform@clearpath.test` / `Platform!2026`. That account exists only while the database is
+seeded with `SEED_DEMO` on and no real operator is configured. Set `PLATFORM_ADMIN_EMAIL` and
+`PLATFORM_ADMIN_PASSWORD` (created on boot, never overwritten) for a deployment, or delete the
+demo row with `SEED_DEMO=0`, and the demo card disappears from `/platform/login`.
+
+The operator is not a workspace user: `/platform` has its own account table and its own cookie,
+so signing in there does not sign you into an agency, and a suspended workspace cannot lock the
+operator out. Everything else on this page — billing, mailroom, pipeline — lives in the
+workspace you land on after signing in at `/login`.
 
 The login page shows these only while `SEED_DEMO` is not `0`. Set `SEED_DEMO=0` in production and the cards disappear.
 
@@ -55,6 +67,7 @@ The operator layer above the tenants lives at `/platform` — a separate mount, 
 | Suspend / reactivate | On the tenant page. Suspension deletes every session in that workspace and returns `403` on agency and portal sign-in until reactivated; data is untouched and the action lands in the tenant's audit chain |
 | Drill-down to clients | `/platform/tenants/:id` — team and client roster with case state, never dispute letters or documents |
 | Invite another owner | On the tenant page, through the same invitation pipeline as a workspace invite |
+| Plan and payment status | Tenant list and tenant page, plus **Payments** (`/platform/billing`) to store the Stripe keys and check the connection |
 
 Bootstrap the first operator with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` (created on boot, password never overwritten). With `SEED_DEMO` left on and no operator configured, a demo operator is seeded at `platform@clearpath.test` / `Platform!2026` and listed on `/platform/login`.
 
@@ -114,7 +127,42 @@ How it behaves:
 
 ## Billing
 
-`STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are reserved for subscription billing and are read by no code path yet: Clearpath has no metering, invoicing or checkout to attach them to. Add the key when that feature exists rather than leaving a live key in a deployment that never calls Stripe.
+Owners subscribe from **Workspace → Billing** (`/app/billing`). Three monthly plans are defined in
+`server/billing.js` and sent to Stripe as inline price data, so there are no dashboard products or
+price ids to create:
+
+| Plan | Price | Clients | Staff seats |
+| --- | --- | --- | --- |
+| Starter | $149 / month | 50 | 2 |
+| Growth | $399 / month | 250 | 6 |
+| Scale | $799 / month | unlimited | unlimited |
+
+How the flow works:
+
+- **Choose plan** creates a Stripe Checkout Session (`mode=subscription`) and redirects to Stripe. The card never touches this app.
+- Coming back with `?checkout=success&session_id=…` makes the server fetch that session from Stripe and sync the subscription — so billing works on a laptop with no public webhook URL.
+- `POST /webhooks/stripe` is the source of truth afterwards: `checkout.session.completed`, `customer.subscription.created|updated|deleted`, `invoice.paid` and `invoice.payment_failed` move `tenants.plan_status` between `active`, `trialing`, `past_due`, `unpaid`, `canceled` and the rest. Every event id is stored once in `billing_events`, so a Stripe retry cannot apply the same change twice.
+- The signature is **mandatory**: with no `STRIPE_WEBHOOK_SECRET` the endpoint answers `503` instead of trusting unsigned posts that claim a workspace is paid up.
+- **Manage payment** opens the Stripe billing portal for invoices, card changes and cancellation. Cancelling there keeps access until the paid period ends; the workspace page then shows the cancellation date.
+- A failing payment does not lock a workspace out. The owner sees a banner on the billing page, the operator sees the status in the console, and Stripe keeps retrying.
+
+### Stripe keys
+
+Two places can hold the key, and the console wins:
+
+| Where | Set it | Notes |
+| --- | --- | --- |
+| Platform console | **Payments** (`/platform/billing`) | Stored in `platform_settings`, applied immediately, shown only as `sk_live_…abcd`. **Check connection** calls Stripe's read-only `/v1/balance` and reports the mode and round trip — the fastest way to tell a bad key from a bad webhook |
+| Environment | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Read on boot; used when nothing is stored in the console |
+
+Keys are validated on save (`sk_`/`rk_` + `live`/`test`, `whsec_`), so a pasted fragment is rejected
+instead of failing every checkout later. Add the webhook endpoint in Stripe → Developers →
+Webhooks pointing at `<APP_ORIGIN>/webhooks/stripe` with the six events above, then paste that
+endpoint's signing secret into the console.
+
+`STRIPE_BASE_URL` exists for tests and a Stripe-compatible mock. A live key in a deployment is a
+real payment credential: the database holds it, so treat `DATA_DIR` and its backups as secret
+material alongside the reset links already stored there.
 
 ---
 
@@ -128,6 +176,7 @@ How it behaves:
 | Clients | Search, stage filter, new-client intake, per-client case file with tradelines, disputes, documents, requests, messages and notes |
 | Disputes | Draft from a tradeline (bureau, account, theory, evidence strength), generate a letter with FCRA citations, track round, status, mailing date and response deadline |
 | Drafting studio | Pick a tradeline and a legal basis (§611 reinvestigation, §623 direct dispute, §605 obsolescence, Regulation V), review the evidence signals and confidence, edit the letter, then approve it into a dispute |
+| Billing | Three monthly plans, Stripe Checkout, the billing portal for cards and invoices, live subscription status and a history of what Stripe reported. Owner only |
 | Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock — or hand the package to Lob and let it print, post and report delivery. Opening a package shows exactly what was sent — the letter text is frozen at mailing time — and the tracking number links straight to the carrier |
 | Documents | Upload with signature verification and SHA-256 hashing, verify, download, request documents from a client, see what is outstanding |
 | Mail log | Owner-only: every invitation and reset email this workspace produced, delivery status, provider errors, manual retry |
@@ -187,6 +236,9 @@ server/
     portal.js     client portal routes
     platform.js   operator console above the tenants
     lob-webhook.js  unauthenticated delivery callbacks from Lob
+    billing.js    workspace billing page, checkout and portal
+    stripe-webhook.js  signed subscription events from Stripe
+  billing.js      Stripe client, plan catalogue, subscription sync
 views/            EJS templates (partials for the three shells)
 public/           one stylesheet, one script, favicon — no third-party assets
 test/             node:test end-to-end suite
@@ -227,7 +279,8 @@ test/             node:test end-to-end suite
 | `MAIL_FROM` | `Clearpath <no-reply@denovocredit.com>` | Sender on a domain verified with your provider |
 | `MAIL_REPLY_TO` | unset | Optional reply address |
 | `LOB_API_KEY` / `LOB_WEBHOOK_SECRET` / `LOB_BASE_URL` | unset | Enables certified print-and-mail through Lob; see the Lob section above |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | unset | Reserved for billing; no code path uses them yet |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | unset | Subscription billing. Keys stored in the platform console win over these; the webhook secret is required before `/webhooks/stripe` accepts events |
+| `STRIPE_BASE_URL` | `https://api.stripe.com/v1` | Only for tests or a Stripe-compatible mock |
 
 Copy `.env.example` to `.env`: the app loads it on start (real environment variables take precedence) and Docker Compose uses it for interpolation.
 
@@ -259,9 +312,9 @@ docker run -d --name clearpath -p 3000:3000 \
 npm test
 ```
 
-The suite spawns the real server on a temporary data directory and drives it over HTTP: health, marketing and legal pages, session requirements, failed and successful sign-in, role restrictions, host-based tenant routing, cross-tenant 404s, portal scoping, PDF magic bytes, the full intake → tradeline → dispute → package → mailed workflow, multipart upload (valid and spoofed), CSRF rejection, logout, invitation email → forced password change, a reset link working exactly once and dropping other sessions, studio draft → approved dispute with edited letter text, the mail log and its retry guard, and reset-request rate limiting.
+The suite spawns the real server on a temporary data directory and drives it over HTTP: health, marketing and legal pages, session requirements, failed and successful sign-in, role restrictions, host-based tenant routing, cross-tenant 404s, portal scoping, PDF magic bytes, the full intake → tradeline → dispute → package → mailed workflow, multipart upload (valid and spoofed), CSRF rejection, logout, invitation email → forced password change, a reset link working exactly once and dropping other sessions, studio draft → approved dispute with edited letter text, the mail log and its retry guard, reset-request rate limiting, Lob send + signed delivery webhook, platform provisioning and suspension, and billing checkout → success redirect → signed Stripe webhook → workspace status, all against a local Stripe stand-in.
 
-Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox and stubs Lob against a local mock), payment processing (none exists) or Docker image builds.
+Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox), letters actually printed by Lob, money actually moving through Stripe (the suite speaks to a mock) or Docker image builds.
 
 ---
 
@@ -271,10 +324,11 @@ Tests do not cover visual regressions, delivery by a real mail provider (the sui
 2. **Configure a mail provider and `MAIL_FROM` on a verified domain, plus `APP_ORIGIN`.** Without them, invitations and reset links only exist in the Mail log.
 3. **Terminate TLS** and set `COOKIE_SECURE=1`; use a real hostname so tenant routing by domain works.
 4. **Back up `DATA_DIR`** on a schedule (SQLite WAL included). Test a restore before you need one.
-5. **Add monitoring** for `/healthz`, disk space and error logs.
-6. **Write your compliance documents** — privacy notice, retention schedule, deletion procedure, dispute authorization. The pages at `/legal/privacy` and `/legal/terms` are honest placeholders, not legal advice.
-7. **Rotate the seeded passwords** or remove the seeded users; `Settings → Team` cannot delete accounts yet.
-8. **Single-node only**: SQLite and the local upload directory assume one instance. For horizontal scaling, move to Postgres and object storage before adding a second replica.
+5. **Finish billing before charging anyone**: store a `sk_live_…` key and the endpoint's `whsec_…` in **Platform console → Payments**, add `<APP_ORIGIN>/webhooks/stripe` in Stripe with the six subscription events, press **Check connection**, then run one real subscription end to end. Until the webhook is set, status only changes while a browser is on the success redirect.
+6. **Add monitoring** for `/healthz`, disk space and error logs.
+7. **Write your compliance documents** — privacy notice, retention schedule, deletion procedure, dispute authorization. The pages at `/legal/privacy` and `/legal/terms` are honest placeholders, not legal advice.
+8. **Rotate the seeded passwords** or remove the seeded users; `Settings → Team` cannot delete accounts yet.
+9. **Single-node only**: SQLite and the local upload directory assume one instance. For horizontal scaling, move to Postgres and object storage before adding a second replica.
 
 ### Not included (by design)
 

@@ -17,6 +17,9 @@
         <% } %>
         <span class="badge blue no-dot"><%= usage.clients %> clients</span>
         <span class="badge <%= usage.openDisputes ? "amber" : "gray" %> no-dot"><%= usage.openDisputes %> open disputes</span>
+        <span class="badge <%= billing && billing.plan ? billing.statusTone : "gray" %> no-dot">
+          <%= billing && billing.plan ? `${billing.plan.name} · ${billing.statusLabel}` : "No plan" %>
+        </span>
       </div>
     </div>
   </div>
@@ -144,6 +147,28 @@
   </section>
 
   <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Billing</h2><p>What this workspace pays for</p></div>
+        <a class="btn btn-sm" href="/platform/billing">Payments</a>
+      </div>
+      <div class="card-body">
+        <dl class="def-list">
+          <div>
+            <dt>Plan</dt>
+            <dd><%= billing && billing.plan ? `${billing.plan.name} · ${money(billing.plan.amount / 100)}/mo` : "No subscription" %></dd>
+          </div>
+          <div>
+            <dt>Status</dt>
+            <dd><span class="badge <%= billing ? billing.statusTone : "gray" %>"><%= billing ? billing.statusLabel : "No plan" %></span></dd>
+          </div>
+          <div><dt>Renews</dt><dd><%= billing && billing.renewsAt ? fmtDate(billing.renewsAt) : "—" %></dd></div>
+          <div><dt>Customer</dt><dd class="mono tiny"><%= billing && billing.customerId ? billing.customerId : "—" %></dd></div>
+          <div><dt>Stripe</dt><dd class="tiny"><%= billing && billing.configured ? `${billing.mode} mode` : "not configured" %></dd></div>
+        </dl>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <div><h2>Team</h2><p>Owner and specialist accounts</p></div>

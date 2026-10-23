@@ -262,6 +262,26 @@ CREATE TABLE IF NOT EXISTS platform_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+/* Deployment-wide operator settings: the Stripe keys live here when they are
+   set from the console instead of the environment. Values are secrets, so the
+   UI only ever renders a mask. */
+CREATE TABLE IF NOT EXISTS platform_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by TEXT
+);
+
+/* Every billing webhook Stripe delivers, deduplicated on its event id so a
+   retry cannot apply the same subscription change twice. */
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  detail TEXT,
+  received_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 /* Exactly what went into the envelope, captured at mailing time. The disputes
    can keep moving after a package is posted; this snapshot cannot. */
 CREATE TABLE IF NOT EXISTS package_letters (
@@ -332,6 +352,7 @@ CREATE INDEX IF NOT EXISTS idx_package_letters ON package_letters (tenant_id, pa
 CREATE INDEX IF NOT EXISTS idx_dispatches_package ON mail_dispatches (tenant_id, package_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_package_events_dedupe ON package_events (provider, provider_event_id);
 CREATE INDEX IF NOT EXISTS idx_package_events_package ON package_events (package_id, id);
+CREATE INDEX IF NOT EXISTS idx_billing_events_tenant ON billing_events (tenant_id, received_at);
 `;
 
 db.exec(schema);
@@ -354,12 +375,39 @@ ensureColumn("tenants", "suspended_note", "TEXT");
 ensureColumn("drafts", "ai_model", "TEXT");
 ensureColumn("drafts", "ai_refined_at", "TEXT");
 ensureColumn("packages", "sent_at", "TEXT");
+/* Billing, driven by Stripe Checkout and kept current by its webhooks. */
+ensureColumn("tenants", "plan", "TEXT");
+ensureColumn("tenants", "plan_status", "TEXT");
+ensureColumn("tenants", "plan_renews_at", "TEXT");
+ensureColumn("tenants", "plan_updated_at", "TEXT");
+ensureColumn("tenants", "stripe_customer_id", "TEXT");
+ensureColumn("tenants", "stripe_subscription_id", "TEXT");
+ensureColumn("tenants", "billing_email", "TEXT");
+// Created after the column exists: the schema block runs before the migrations.
+db.exec("CREATE INDEX IF NOT EXISTS idx_tenants_stripe_customer ON tenants (stripe_customer_id);");
 try {
   db.exec("PRAGMA busy_timeout = 5000;");
 } catch { /* older SQLite builds */ }
 
 export function getTenantById(id) {
   return db.prepare("SELECT * FROM tenants WHERE id = ?").get(Number(id));
+}
+
+/** Read an operator setting (Stripe keys and anything else deployment-wide). */
+export function getSetting(key) {
+  return db.prepare("SELECT value FROM platform_settings WHERE key = ?").get(String(key))?.value || "";
+}
+
+export function setSetting(key, value, updatedBy = "platform operator") {
+  const clean = String(value ?? "").trim();
+  if (!clean) {
+    db.prepare("DELETE FROM platform_settings WHERE key = ?").run(String(key));
+    return;
+  }
+  db.prepare(
+    `INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+  ).run(String(key), clean, new Date().toISOString(), updatedBy);
 }
 
 export function getTenantBySlug(slug) {

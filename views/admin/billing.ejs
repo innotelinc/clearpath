@@ -1,0 +1,164 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Billing</h1>
+    <p>Your Clearpath subscription. Stripe handles the card — this app never sees it.</p>
+  </div>
+  <div class="page-actions">
+    <% if (billing.plan) { %>
+      <span class="badge <%= billing.statusTone %>"><%= billing.plan.name %> · <%= billing.statusLabel %></span>
+    <% } else { %>
+      <span class="badge gray">No plan yet</span>
+    <% } %>
+  </div>
+</div>
+
+<% if (!billing.configured) { %>
+  <div class="notice notice-error" style="background:var(--amber-soft);border-color:#f0dcb8;color:#7a4a0d" role="alert">
+    <svg><use href="#i-alert"/></svg>
+    <div class="grow">
+      <strong>Stripe is not connected.</strong>
+      No key is set for this deployment, so checkout cannot start. A platform operator adds the secret key in
+      the <a href="/platform/billing">platform console</a>; the environment variable <code>STRIPE_SECRET_KEY</code> works too.
+    </div>
+  </div>
+<% } else if (billing.mode === "unrecognised") { %>
+  <div class="notice notice-error" role="alert">
+    <svg><use href="#i-alert"/></svg>
+    <div class="grow">
+      The configured Stripe key does not start with <code>sk_live_</code> or <code>sk_test_</code>, so Stripe will
+      reject it. Replace it in the <a href="/platform/billing">platform console</a>.
+    </div>
+  </div>
+<% } %>
+
+<% if (billing.needsAttention) { %>
+  <div class="notice notice-error" role="alert">
+    <svg><use href="#i-alert"/></svg>
+    <div class="grow">
+      <strong>Payment needs attention.</strong>
+      Stripe reports this subscription as <%= billing.statusLabel.toLowerCase() %>. Open the billing portal to update the card,
+      or the workspace keeps working while Stripe retries.
+    </div>
+  </div>
+<% } %>
+
+<div class="dash-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Current plan</h2><p>What this workspace pays for</p></div>
+        <% if (billing.customerId) { %>
+          <form method="post" action="/app/billing/portal">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <button class="btn btn-sm" type="submit"><svg><use href="#i-card"/></svg>Manage payment</button>
+          </form>
+        <% } %>
+      </div>
+      <div class="card-body">
+        <% if (billing.plan) { %>
+          <div class="row" style="gap:14px;flex-wrap:wrap;align-items:baseline">
+            <strong style="font-size:22px"><%= billing.plan.name %></strong>
+            <span class="muted"><%= money(billing.plan.amount / 100) %> / month</span>
+            <span class="badge <%= billing.statusTone %>"><%= billing.statusLabel %></span>
+          </div>
+          <dl class="def-list" style="margin-top:16px">
+            <div><dt>Clients</dt><dd><%= used.clients %><%= billing.plan.clients ? ` of ${billing.plan.clients}` : " · unlimited" %></dd></div>
+            <div><dt>Staff seats</dt><dd><%= used.staff %><%= billing.plan.staff ? ` of ${billing.plan.staff}` : " · unlimited" %></dd></div>
+            <div><dt><%= billing.status === "canceled" ? "Access until" : "Renews" %></dt><dd><%= billing.renewsAt ? fmtDate(billing.renewsAt) : "—" %></dd></div>
+            <div><dt>Stripe customer</dt><dd class="mono tiny"><%= billing.customerId || "—" %></dd></div>
+          </dl>
+        <% } else { %>
+          <p class="muted">
+            This workspace has no subscription. Pick a plan below — nothing is charged until you finish checkout in Stripe.
+          </p>
+          <dl class="def-list" style="margin-top:16px">
+            <div><dt>Clients on file</dt><dd><%= used.clients %></dd></div>
+            <div><dt>Staff seats</dt><dd><%= used.staff %></dd></div>
+            <div><dt>Disputes drafted</dt><dd><%= used.disputes %></dd></div>
+          </dl>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Plans</h2><p>Monthly, cancel from the billing portal at any time</p></div>
+        <span class="chip mono">usd</span>
+      </div>
+      <div class="card-body">
+        <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px">
+          <% plans.forEach((plan) => { %>
+            <div class="card" style="padding:16px;border:1px solid var(--line)">
+              <div class="row" style="justify-content:space-between;align-items:baseline">
+                <strong><%= plan.name %></strong>
+                <% if (billing.plan && billing.plan.key === plan.key) { %>
+                  <span class="badge teal">Current</span>
+                <% } %>
+              </div>
+              <div style="font-size:24px;margin:8px 0 2px"><%= money(plan.amount / 100) %><span class="tiny muted">/mo</span></div>
+              <p class="tiny muted" style="min-height:34px"><%= plan.blurb %></p>
+              <ul class="tiny muted" style="margin:8px 0 14px;padding-left:16px">
+                <li><%= plan.clients ? `${plan.clients} clients` : "Unlimited clients" %></li>
+                <li><%= plan.staff ? `${plan.staff} staff seats` : "Unlimited staff seats" %></li>
+                <li>Certified mailroom, pipeline and portal</li>
+              </ul>
+              <% if (billing.plan && billing.plan.key === plan.key) { %>
+                <button class="btn btn-sm btn-block" type="button" disabled>Selected</button>
+              <% } else { %>
+                <form method="post" action="/app/billing/checkout">
+                  <input type="hidden" name="_csrf" value="<%= csrf %>">
+                  <input type="hidden" name="plan" value="<%= plan.key %>">
+                  <button class="btn btn-sm btn-primary btn-block" type="submit"
+                          <%= !billing.configured ? "disabled" : "" %>>
+                    <%= billing.plan ? `Switch to ${plan.name}` : `Choose ${plan.name}` %>
+                  </button>
+                </form>
+              <% } %>
+            </div>
+          <% }) %>
+        </div>
+        <p class="tiny muted" style="margin-top:14px">
+          Switching plans starts a new subscription in Stripe; the old one is cancelled there, so you are never billed twice.
+          <% if (!billing.configured) { %>Choose is disabled until an operator configures the key.<% } %>
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head"><div><h2>Billing events</h2><p>What Stripe has told this workspace</p></div></div>
+      <div class="card-body">
+        <% if (!events.length) { %>
+          <p class="muted tiny">Nothing yet. The first event arrives when a checkout completes.</p>
+        <% } else { %>
+          <div class="stack" style="gap:12px">
+            <% events.forEach((event) => { %>
+              <div class="row" style="gap:10px;align-items:flex-start">
+                <span class="badge gray mono"><%= event.type.replace("customer.subscription.", "sub.").replace("checkout.session.", "checkout.") %></span>
+                <div class="grow">
+                  <div class="tiny"><%= event.detail || "—" %></div>
+                  <div class="tiny muted"><%= fmtDateTime(event.received_at) %></div>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>How this works</h2><p>Payment, receipts and cancellation</p></div></div>
+      <div class="card-body stack tiny muted" style="gap:10px">
+        <p>Checkout happens on Stripe's own page. Clearpath stores only the customer and subscription ids, the plan and its status.</p>
+        <p>Stripe calls <code>/webhooks/stripe</code> when a subscription starts, renews, fails or ends — that is what moves the badge on this page.</p>
+        <p>Receipts and invoices live in the billing portal. Cancelling there keeps access until the paid period ends.</p>
+        <p>Questions about an invoice: <a href="mailto:<%= product.support %>"><%= product.support %></a>.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/app-foot") %>

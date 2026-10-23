@@ -44,6 +44,7 @@
         <tr>
           <th>Workspace</th>
           <th>Status</th>
+          <th>Plan</th>
           <th class="right">Clients</th>
           <th class="right">Seats</th>
           <th class="right">Open disputes</th>
@@ -69,6 +70,14 @@
                 <span class="badge rose">Suspended</span>
               <% } else { %>
                 <span class="badge teal">Active</span>
+              <% } %>
+            </td>
+            <td>
+              <% if (tenant.billing && tenant.billing.plan) { %>
+                <span class="badge <%= tenant.billing.statusTone %> no-dot"><%= tenant.billing.plan.name %></span>
+                <div class="tiny muted"><%= tenant.billing.statusLabel %><%= tenant.billing.renewsAt ? ` · ${fmtDate(tenant.billing.renewsAt)}` : "" %></div>
+              <% } else { %>
+                <span class="badge gray no-dot">No plan</span>
               <% } %>
             </td>
             <td class="right num"><%= tenant.usage.clients %></td>

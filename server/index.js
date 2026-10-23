@@ -14,7 +14,10 @@ import adminRoutes from "./routes/admin.js";
 import portalRoutes from "./routes/portal.js";
 import platformRoutes from "./routes/platform.js";
 import lobWebhookRoutes from "./routes/lob-webhook.js";
+import stripeWebhookRoutes from "./routes/stripe-webhook.js";
+import billingRoutes from "./routes/billing.js";
 import { lobConfigured, lobMode, lobWebhookSecret } from "./lob.js";
+import { billingSummary, stripeConfigured, stripeMode, stripeWebhookSecret } from "./billing.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -22,6 +25,13 @@ const root = path.resolve(here, "..");
 if (process.env.SEED_DEMO !== "0") {
   const seeded = seedDemo();
   if (seeded) console.log("Clearpath: seeded demo tenants and records");
+}
+
+if (stripeConfigured()) {
+  console.log(`Clearpath: Stripe billing enabled in ${stripeMode()} mode`);
+  if (!stripeWebhookSecret()) {
+    console.warn("Clearpath: STRIPE_WEBHOOK_SECRET is not set, so /webhooks/stripe refuses events until it is");
+  }
 }
 
 if (lobConfigured) {
@@ -92,6 +102,7 @@ app.get("/healthz", (req, res) => {
 // raw (the signature covers the exact bytes) and mounted before the app's
 // cookie-authenticated pipeline.
 app.use("/webhooks", express.raw({ type: "application/json", limit: "1mb" }), lobWebhookRoutes);
+app.use("/webhooks", express.raw({ type: "application/json", limit: "1mb" }), stripeWebhookRoutes);
 
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 app.use(express.json({ limit: "1mb" }));
@@ -116,6 +127,10 @@ app.use((req, res, next) => {
   res.locals.demoMode = process.env.SEED_DEMO !== "0";
   res.locals.aiConfigured = aiConfigured;
   res.locals.aiLabel = aiLabel();
+  res.locals.billing =
+    res.locals.tenant && res.locals.user && res.locals.user.role !== "client"
+      ? billingSummary(res.locals.tenant)
+      : null;
   res.locals.navCounts =
     res.locals.tenant && res.locals.user && res.locals.user.role !== "client"
       ? tenantStats(res.locals.tenant.id)
@@ -132,6 +147,8 @@ app.use(checkCsrf);
 app.use("/platform", platformRoutes);
 app.use("/", publicRoutes);
 app.use("/", authRoutes);
+// Billing is owner-only, so it is mounted ahead of the workspace routes.
+app.use("/app/billing", requireUser(["owner"]), billingRoutes);
 app.use("/app", requireUser(["owner", "specialist"]), adminRoutes);
 app.use("/portal", requireUser(["client"]), portalRoutes);
 

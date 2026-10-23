@@ -10,11 +10,24 @@ import { Router } from "express";
 import {
   audit,
   db,
+  getSetting,
   listTenants,
+  setSetting,
   tenantClients,
   tenantTeam,
   tenantUsage
 } from "../db.js";
+import {
+  PLANS,
+  billingSummary,
+  checkStripeConnection,
+  maskKey,
+  stripeConfigured,
+  stripeKeySource,
+  stripeMode,
+  stripeSecretKey,
+  stripeWebhookSecret
+} from "../billing.js";
 import { createAccount, emailDeliveryNote, sendCredentials } from "../accounts.js";
 import { mailConfigured } from "../mail.js";
 import { throttle } from "../auth.js";
@@ -122,7 +135,11 @@ router.post("/logout", (req, res) => {
 router.use(requirePlatform);
 
 router.get("/", (req, res) => {
-  const tenants = listTenants().map((tenant) => ({ ...tenant, usage: tenantUsage(tenant.id) }));
+  const tenants = listTenants().map((tenant) => ({
+    ...tenant,
+    usage: tenantUsage(tenant.id),
+    billing: billingSummary(tenant)
+  }));
   const totals = tenants.reduce(
     (acc, tenant) => {
       acc.tenants += 1;
@@ -210,6 +227,7 @@ router.post("/tenants", async (req, res) => {
     title: tenant.name,
     page: "tenants",
     tenant,
+    billing: billingSummary(tenant),
     usage: tenantUsage(tenantId),
     team: tenantTeam(tenantId),
     clients: [],
@@ -237,6 +255,7 @@ router.get("/tenants/:id", (req, res) => {
     title: tenant.name,
     page: "tenants",
     tenant,
+    billing: billingSummary(tenant),
     usage: tenantUsage(tenant.id),
     team: tenantTeam(tenant.id),
     clients: tenantClients(tenant.id),
@@ -300,6 +319,7 @@ router.post("/tenants/:id/owner", async (req, res) => {
       title: tenant.name,
       page: "tenants",
       tenant,
+      billing: billingSummary(tenant),
       usage: tenantUsage(tenant.id),
       team: tenantTeam(tenant.id),
       clients: tenantClients(tenant.id),
@@ -320,11 +340,101 @@ router.post("/tenants/:id/owner", async (req, res) => {
     title: tenant.name,
     page: "tenants",
     tenant,
+    billing: billingSummary(tenant),
     usage: tenantUsage(tenant.id),
     team: tenantTeam(tenant.id),
     clients: tenantClients(tenant.id),
     invite: { name, email, password: mailConfigured ? null : password, delivery: emailDeliveryNote(row) }
   });
+});
+
+/* ---------------- payment settings ---------------- */
+
+function paymentsPage(req, res, { notice = "", error = "", result = null, status = 200 } = {}) {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(status).render("platform/billing", {
+    title: "Payments",
+    page: "billing",
+    configured: stripeConfigured(),
+    mode: stripeMode(),
+    source: stripeKeySource(),
+    secretMask: maskKey(stripeSecretKey()),
+    webhookMask: maskKey(stripeWebhookSecret()),
+    secretFromEnv: Boolean(process.env.STRIPE_SECRET_KEY),
+    webhookFromEnv: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
+    storedSecret: Boolean(getSetting("stripe_secret_key")),
+    storedWebhook: Boolean(getSetting("stripe_webhook_secret")),
+    plans: PLANS,
+    webhookUrl: `${String(process.env.APP_ORIGIN || "").replace(/\/+$/, "") || "https://your-host"}/webhooks/stripe`,
+    result,
+    notice,
+    error
+  });
+}
+
+router.get("/billing", (req, res) => paymentsPage(req, res));
+
+router.post("/billing", (req, res) => {
+  const secret = String(req.body.secret_key || "").trim();
+  const webhook = String(req.body.webhook_secret || "").trim();
+  const clearStored = req.body.clear_stored === "1";
+
+  if (secret && !/^(sk|rk)_(live|test)_/.test(secret)) {
+    return paymentsPage(req, res, {
+      status: 400,
+      error: "That does not look like a Stripe secret key — they start with sk_live_ or sk_test_ (restricted keys rk_). Nothing was saved."
+    });
+  }
+  if (webhook && !webhook.startsWith("whsec_")) {
+    return paymentsPage(req, res, {
+      status: 400,
+      error: "Stripe webhook secrets start with whsec_. Copy it from the endpoint's detail page in the Stripe dashboard. Nothing was saved."
+    });
+  }
+
+  if (clearStored) {
+    setSetting("stripe_secret_key", "", platformActor(req));
+    setSetting("stripe_webhook_secret", "", platformActor(req));
+    console.warn(`Clearpath: Stripe keys cleared from the console by ${platformActor(req)}`);
+    return paymentsPage(req, res, {
+      notice: process.env.STRIPE_SECRET_KEY
+        ? "Stored keys removed — the deployment is back on the environment variables."
+        : "Stored keys removed. Billing is off until a key is set again."
+    });
+  }
+
+  if (!secret && !webhook) {
+    return paymentsPage(req, res, { status: 400, error: "Paste a key (or the webhook secret) to save." });
+  }
+
+  if (secret) setSetting("stripe_secret_key", secret, platformActor(req));
+  if (webhook) setSetting("stripe_webhook_secret", webhook, platformActor(req));
+  console.log(
+    `Clearpath: Stripe settings updated by ${platformActor(req)} — key ${maskKey(stripeSecretKey())}, webhook ${stripeWebhookSecret() ? "set" : "missing"}`
+  );
+  return paymentsPage(req, res, {
+    notice: `${secret ? "Secret key saved" : "Secret key unchanged"}${webhook ? " · webhook secret saved" : ""}. New checkouts use them immediately — no restart needed.`
+  });
+});
+
+router.post("/billing/test", async (req, res) => {
+  try {
+    const result = await checkStripeConnection();
+    if (result.mode === "live" && !result.livemode) {
+      return paymentsPage(req, res, {
+        status: 502,
+        result,
+        error: "The key looks live but Stripe reports test mode. Check which key was pasted."
+      });
+    }
+    return paymentsPage(req, res, {
+      result,
+      notice: `Stripe accepted the key — ${result.livemode ? "live" : "test"} mode, answered in ${result.ms} ms.`
+    });
+  } catch (err) {
+    console.warn(`Clearpath: Stripe key check failed — ${err.message}`);
+    return paymentsPage(req, res, { status: 502, error: err.message });
+  }
 });
 
 export default router;
