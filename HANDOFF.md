@@ -11,7 +11,7 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 | --- | --- |
 | App | Express 4 + EJS 3 + `node:sqlite`, no build step, no client framework |
 | Node | 22.5+ (uses `node:sqlite`; currently verified on 22.23.3) |
-| Tests | `npm test` — 25 end-to-end tests, all passing |
+| Tests | `npm test` — 33 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive) |
 | Dev server | `PORT=3400 DATA_DIR=./data node server/index.js` (log: `.server.log`) |
 | Production entry | `Dockerfile` + `docker-compose.yml` (image not built here: no Docker on this machine) |
 | Git | branch `main`, pushed to `https://github.com/innotelinc/clearpath` (public) |
@@ -19,6 +19,28 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 
 Demo sign-ins: `dana@denovocredit.com` / `Denovo!2026` (owner), `marcus@denovocredit.com` /
 `Specialist!2026`, `amara@example.com` / `Client!2026` (portal).
+Platform operator (seeded while `SEED_DEMO` is on): `platform@clearpath.test` / `Platform!2026`
+at `/platform/login`.
+
+---
+
+## 2026-10-23 — platform console, automation, AI gateway, sent-package archive
+
+A previous cloud session that built the platform console did not survive, so it was rebuilt here.
+
+| Area | What changed |
+| --- | --- |
+| Platform console `/platform` | New `platform_admins` + `platform_sessions` tables and `server/platform-auth.js`. Own mount, own cookie, own login page. Tenant list with live usage, provision tenant + first owner invite, suspend/reactivate (deletes tenant sessions and returns 403 on sign-in), owner re-invite, drill-down to the client roster. Bootstrapped by `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD`, or seeded as a demo operator. |
+| Schema | `tenants.status` / `suspended_at` / `suspended_note`, `packages.sent_at`, `drafts.ai_model` / `ai_refined_at`, plus `package_letters` and `case_insights`. Additive via `ensureColumn`, so existing databases migrate on boot. |
+| Dispute pipeline `/app/pipeline` | `server/pipeline.js`: scans tradelines, drafts everything above the 75% evidence floor with the deterministic drafter (`drafts.status = 'Ready'`), queues the rest with explicit reasons, and approves a batch into disputes + one certified-mail package per client and bureau. Nothing is mailed automatically. |
+| AI (OmniRoute) | `server/ai.js` — one OpenAI-compatible gateway, one key. Studio **Rewrite with AI** and client **Summarise case with AI**; model recorded on the draft/insight. No key: surfaces explain the setting and everything else keeps working. |
+| Mailroom | Marking a package mailed now stores `packages.sent_at` and freezes every letter body into `package_letters`. New package page `/app/mailroom/:id` shows what was sent; tracking numbers link to USPS/UPS/FedEx via `trackingUrl()`. |
+
+Gotcha worth remembering: `client` is a reserved EJS compiler option, so a view local with that
+name breaks `include()` — pass client records as `clientRecord` (see `views/admin/client.ejs`).
+
+No postal-mail vendor is integrated. Outbound *email* uses Resend / Postmark / SendGrid when one of
+their keys is set; physical certified mail is still printed and posted by hand.
 
 ---
 

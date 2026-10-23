@@ -1,7 +1,9 @@
 import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR, db, audit, auditEntries, emailRows, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
+import { DATA_DIR, db, audit, auditEntries, emailRows, latestInsight, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
+import { aiChat, aiConfigured, parseJsonReply } from "../ai.js";
+import { approvePipeline, runPipeline, scanPipeline } from "../pipeline.js";
 import { hashPassword, verifyPassword, strongEnough } from "../security.js";
 import { createAccount, emailDeliveryNote, sendCredentials, sendResetLink } from "../accounts.js";
 import { deliver, mailConfigured, mailStatus } from "../mail.js";
@@ -93,6 +95,8 @@ function renderClient(req, res, client, extra = {}) {
     tradelines: clientTradelines(t, client.id),
     packages: clientPackages(t, client.id),
     portalUser,
+    insight: latestInsight(t, client.id) || null,
+    aiConfigured,
     invite: null,
     ...extra
   });
@@ -387,19 +391,57 @@ router.post("/mailroom/:id/mailed", (req, res) => {
   const pkg = db.prepare("SELECT * FROM packages WHERE id = ? AND tenant_id = ?").get(Number(req.params.id), t);
   if (!pkg) return fail(res, 404, "Package not found", "That package is not in this workspace.");
   const tracking = String(req.body.tracking || "").trim().slice(0, 40) || null;
-  db.prepare("UPDATE packages SET status = 'In transit', tracking = ? WHERE id = ? AND tenant_id = ?").run(tracking, pkg.id, t);
+  const sentAt = new Date().toISOString();
+  db.prepare("UPDATE packages SET status = 'In transit', tracking = ?, sent_at = ? WHERE id = ? AND tenant_id = ?").run(
+    tracking,
+    sentAt,
+    pkg.id,
+    t
+  );
   const mailed = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
   const items = db.prepare("SELECT dispute_id FROM package_items WHERE package_id = ?").all(pkg.id);
-  if (items.length) {
+  let letterIds = items.map((item) => item.dispute_id).filter(Boolean);
+  if (letterIds.length) {
     const mark = db.prepare("UPDATE disputes SET status = 'Mailed', mailed = ? WHERE id = ? AND tenant_id = ?");
-    items.forEach((item) => mark.run(mailed, item.dispute_id, t));
+    letterIds.forEach((id) => mark.run(mailed, id, t));
   } else {
     // Legacy packages created before items were recorded.
+    letterIds = db
+      .prepare(
+        "SELECT id FROM disputes WHERE tenant_id = ? AND client_id = ? AND bureau = ? AND status IN ('Needs review','Queued')"
+      )
+      .all(t, pkg.client_id, pkg.bureau)
+      .map((row) => row.id);
     db.prepare("UPDATE disputes SET status = 'Mailed', mailed = ? WHERE tenant_id = ? AND client_id = ? AND bureau = ? AND status IN ('Needs review','Queued')")
       .run(mailed, t, pkg.client_id, pkg.bureau);
   }
+
+  // Freeze what was actually posted. Disputes keep evolving; this cannot.
+  const snapshot = db.prepare(
+    "INSERT OR IGNORE INTO package_letters (tenant_id, package_id, dispute_id, ref, account, bureau, body) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  );
+  letterIds.forEach((id) => {
+    const full = getDispute(t, id);
+    if (!full) return;
+    const tradeline = {
+      creditor: full.creditor || String(full.account).split("••")[0].trim(),
+      mask: full.mask || (String(full.account).split("••")[1] || "").trim(),
+      type: full.tradeline_type || "Collection",
+      balance: full.balance || 0,
+      reason: full.issue,
+      evidence: full.evidence || "[]"
+    };
+    const body = letterText({
+      tenant: req.tenant,
+      client: { name: full.client_name, email: full.client_email, phone: full.client_phone },
+      dispute: full,
+      tradeline
+    });
+    snapshot.run(t, pkg.id, full.id, full.ref, full.account, full.bureau, body);
+  });
+
   audit(t, actor(req), "Mailed package", `${pkg.ref}${tracking ? " · " + tracking : ""}`);
-  back(res, "/app/mailroom", { notice: `${pkg.ref} marked in transit.` });
+  back(res, "/app/mailroom", { notice: `${pkg.ref} marked in transit. What was sent is stored on the package.` });
 });
 
 router.get("/mailroom/labels.pdf", (req, res) => {
@@ -446,6 +488,37 @@ router.get("/mailroom/queue.pdf", (req, res) => {
     };
   });
   sendPdf(res, "clearpath-mailing-queue.pdf", queuePdf(req.tenant, ready, withInput, map));
+});
+
+router.get("/mailroom/:id", (req, res) => {
+  const t = tenantId(req);
+  const pkg = db.prepare("SELECT * FROM packages WHERE id = ? AND tenant_id = ?").get(Number(req.params.id), t);
+  if (!pkg) return fail(res, 404, "Package not found", "That package is not in this workspace.");
+  const client = db.prepare("SELECT * FROM clients WHERE id = ? AND tenant_id = ?").get(pkg.client_id, t);
+
+  let letters = db
+    .prepare("SELECT * FROM package_letters WHERE tenant_id = ? AND package_id = ? ORDER BY id")
+    .all(t, pkg.id);
+  // Packages posted before snapshots existed still show their disputes.
+  if (!letters.length) {
+    letters = db
+      .prepare(
+        `SELECT pi.dispute_id, d.ref, d.account, d.bureau, COALESCE(d.letter_body, '') AS body
+         FROM package_items pi JOIN disputes d ON d.id = pi.dispute_id
+         WHERE pi.package_id = ? AND d.tenant_id = ? ORDER BY d.id`
+      )
+      .all(pkg.id, t);
+  }
+
+  res.render("admin/package", {
+    title: pkg.ref,
+    page: "mailroom",
+    pkg,
+    // `client` is reserved as an EJS compiler option — the view needs another name.
+    clientRecord: client,
+    letters,
+    snapshot: letters.length > 0 && Boolean(letters[0].captured_at)
+  });
 });
 
 /* ---------------- documents ---------------- */
@@ -704,6 +777,205 @@ router.post("/studio/:id/discard", (req, res) => {
   db.prepare("DELETE FROM drafts WHERE id = ? AND tenant_id = ?").run(draft.id, t);
   audit(t, actor(req), "Discarded a studio draft for", draft.client_name);
   back(res, "/app/studio", { notice: "Draft discarded. No dispute was created." });
+});
+
+/* ---------------- automated pipeline ---------------- */
+
+router.get("/pipeline", (req, res) => {
+  const t = tenantId(req);
+  const scan = scanPipeline(t);
+  const ready = db
+    .prepare(
+      `SELECT d.*, c.name AS client_name, tr.creditor, tr.mask, tr.bureau
+       FROM drafts d
+       JOIN clients c ON c.id = d.client_id
+       LEFT JOIN tradelines tr ON tr.id = d.tradeline_id
+       WHERE d.tenant_id = ? AND d.status = 'Ready' ORDER BY d.id`
+    )
+    .all(t);
+  res.render("admin/pipeline", {
+    title: "Dispute pipeline",
+    page: "pipeline",
+    scan,
+    ready,
+    evidenceFloor: 75,
+    aiConfigured
+  });
+});
+
+router.post("/pipeline/run", (req, res) => {
+  const result = runPipeline(req.tenant, actor(req));
+  if (!result.created) {
+    return back(res, "/app/pipeline", {
+      notice: `Nothing new to draft. ${result.scan.exceptions.length} item(s) still need a human.`
+    });
+  }
+  back(res, "/app/pipeline", {
+    notice: `${result.created} letter${result.created === 1 ? "" : "s"} drafted. ${result.scan.exceptions.length} item(s) went to the review queue.`
+  });
+});
+
+router.post("/pipeline/approve", (req, res) => {
+  const result = approvePipeline(req.tenant, actor(req));
+  if (!result.disputes) {
+    return back(res, "/app/pipeline", { error: "There are no auto-drafted letters to approve. Run the automation first." });
+  }
+  back(res, "/app/mailroom", {
+    notice: `${result.disputes} dispute${result.disputes === 1 ? "" : "s"} approved · ${result.packages.length} package${result.packages.length === 1 ? "" : "s"} ready to print and post.`
+  });
+});
+
+/* ---------------- AI: letter refinement through OmniRoute ---------------- */
+
+router.post("/studio/:id/refine", async (req, res) => {
+  const t = tenantId(req);
+  const draft = getDraft(t, req.params.id);
+  if (!draft) return fail(res, 404, "Draft not found", "That draft is not in this workspace.");
+  if (draft.status === "Approved") {
+    return back(res, `/app/studio/${draft.id}`, { error: "This draft was already approved, so it can no longer be rewritten." });
+  }
+  if (!aiConfigured) {
+    return back(res, `/app/studio/${draft.id}`, {
+      error: "OmniRoute is not configured. Set OMNIROUTE_API_KEY and restart — the deterministic draft is still valid without it."
+    });
+  }
+
+  const instruction =
+    String(req.body.instruction || "").trim().slice(0, 300) ||
+    "Tighten the letter and keep every fact and citation.";
+  const strategy = STRATEGIES[draft.strategy] || STRATEGIES["fcra-611"];
+  const caseFile = [
+    `Client: ${draft.client_name}`,
+    `Bureau: ${bureau[draft.bureau]?.name || draft.bureau}`,
+    `Account: ${draft.creditor || "unknown"} ending ${draft.mask || "unknown"} (${draft.tradeline_type || "item"})`,
+    `Reported balance: ${draft.balance ? money(draft.balance) : "none"}`,
+    `Basis of dispute: ${draft.reason || "not recorded"}`,
+    `Legal basis: ${strategy.label} (${strategy.authority})`,
+    `Citations to preserve: ${parseList(draft.citations).join("; ") || strategy.support}`,
+    `Evidence on file: ${parseList(draft.evidence).join("; ") || "none recorded"}`
+  ].join("\n");
+
+  try {
+    const { text, model } = await aiChat({
+      maxTokens: 1800,
+      temperature: 0.2,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You edit credit-repair dispute letters inside a compliance workflow. Rewrite only the letter body supplied. Never invent facts, dates, balances, documents or statutes, and never add a citation the case file does not support. Keep every citation that is already in the letter and keep the remedy requested. Reply with the letter body only: no markdown fences, no subject line, no commentary."
+        },
+        {
+          role: "user",
+          content: `CASE FILE\n${caseFile}\n\nINSTRUCTION\n${instruction}\n\nCURRENT LETTER\n${draft.body}`
+        }
+      ]
+    });
+
+    const body = text
+      .replace(/^```[a-z]*\s*/i, "")
+      .replace(/```\s*$/, "")
+      .trim()
+      .slice(0, 20000);
+    if (!body) throw new Error("The gateway returned an empty letter.");
+
+    db.prepare("UPDATE drafts SET body = ?, ai_model = ?, ai_refined_at = ? WHERE id = ? AND tenant_id = ?").run(
+      body,
+      model,
+      new Date().toISOString(),
+      draft.id,
+      t
+    );
+    audit(t, actor(req), "Refined a letter with AI for", `${draft.client_name} · ${model}`);
+    back(res, `/app/studio/${draft.id}`, { notice: `Letter refined with ${model}. Read it before approving.` });
+  } catch (err) {
+    back(res, `/app/studio/${draft.id}`, { error: err.message });
+  }
+});
+
+/* ---------------- AI: case intelligence through OmniRoute ---------------- */
+
+router.post("/clients/:id/analyze", async (req, res) => {
+  const t = tenantId(req);
+  const client = getClient(t, req.params.id);
+  if (!client) return fail(res, 404, "Client not found", "That client is not in this workspace.");
+  if (!aiConfigured) {
+    return back(res, `/app/clients/${client.id}`, {
+      error: "OmniRoute is not configured. Set OMNIROUTE_API_KEY and restart to use case summaries."
+    });
+  }
+
+  const caseFile = {
+    client: {
+      name: client.name,
+      stage: client.stage,
+      scores: { transunion: client.tu, experian: client.ex, equifax: client.eq },
+      joined: client.joined,
+      notes: client.notes || ""
+    },
+    tradelines: clientTradelines(t, client.id).map((row) => ({
+      bureau: row.bureau,
+      creditor: row.creditor,
+      mask: row.mask,
+      type: row.type,
+      balance: row.balance,
+      opened: row.opened,
+      dispute_basis: row.reason,
+      evidence_strength: row.strength,
+      evidence: parseList(row.evidence)
+    })),
+    open_disputes: clientDisputes(t, client.id)
+      .filter((row) => !["Deleted", "Closed"].includes(row.status))
+      .map((row) => ({
+        ref: row.ref,
+        bureau: row.bureau,
+        account: row.account,
+        status: row.status,
+        round: row.round,
+        due: row.due
+      })),
+    documents: clientDocuments(t, client.id).map((row) => ({
+      name: row.name,
+      type: row.type,
+      status: row.status
+    })),
+    outstanding_requests: clientRequests(t, client.id)
+      .filter((row) => !row.done)
+      .map((row) => ({ label: row.label, due: row.due }))
+  };
+
+  try {
+    const { text, model } = await aiChat({
+      maxTokens: 1200,
+      temperature: 0.3,
+      messages: [
+        {
+          role: "system",
+          content:
+            'You are a credit-repair case analyst. Use only the JSON case file provided and do not invent documents, dates or balances. Reply with JSON only, shaped exactly like {"summary":"<=120 words of plain text","theories":[{"title":"short name","basis":"the FCRA or Regulation V section relied on","evidence":"the documents in this file that support it, or what is missing","next_step":"the single next action for the specialist"}]}. At most three theories, strongest first. An empty theories array is a valid answer.'
+        },
+        { role: "user", content: JSON.stringify(caseFile) }
+      ]
+    });
+
+    const parsed = parseJsonReply(text) || { summary: text.slice(0, 2000), theories: [] };
+    const summary = String(parsed.summary || "").trim().slice(0, 4000);
+    if (!summary) throw new Error("The gateway returned an empty summary.");
+    const theories = (Array.isArray(parsed.theories) ? parsed.theories : []).slice(0, 5).map((item) => ({
+      title: String(item?.title || "Theory").slice(0, 140),
+      basis: String(item?.basis || "").slice(0, 200),
+      evidence: String(item?.evidence || "").slice(0, 400),
+      next_step: String(item?.next_step || "").slice(0, 300)
+    }));
+
+    db.prepare(
+      "INSERT INTO case_insights (tenant_id, client_id, summary, theories, model, created_by) VALUES (?, ?, ?, ?, ?, ?)"
+    ).run(t, client.id, summary, JSON.stringify(theories), model, actor(req));
+    audit(t, actor(req), "Generated a case summary with AI for", `${client.name} · ${model}`);
+    back(res, `/app/clients/${client.id}`, { notice: `Case summary generated with ${model}. It is advisory — check it against the file.` });
+  } catch (err) {
+    back(res, `/app/clients/${client.id}`, { error: err.message });
+  }
 });
 
 /* ---------------- mail log ---------------- */

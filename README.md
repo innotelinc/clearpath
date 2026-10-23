@@ -44,6 +44,54 @@ Northstar is a second tenant used to demonstrate isolation. Requests are routed 
 
 ---
 
+## Platform console
+
+The operator layer above the tenants lives at `/platform` — a separate mount, a separate account table (`platform_admins`), and a separate session cookie. An operator is not a tenant user, so suspending a workspace can never lock the operator out.
+
+| Capability | Where |
+| --- | --- |
+| Tenant list with live usage | `/platform` — clients, staff seats, portal accounts, open disputes, documents, packages, last activity |
+| Create tenant + first owner invite | `/platform/tenants/new` — creates the workspace and queues the owner invitation together |
+| Suspend / reactivate | On the tenant page. Suspension deletes every session in that workspace and returns `403` on agency and portal sign-in until reactivated; data is untouched and the action lands in the tenant's audit chain |
+| Drill-down to clients | `/platform/tenants/:id` — team and client roster with case state, never dispute letters or documents |
+| Invite another owner | On the tenant page, through the same invitation pipeline as a workspace invite |
+
+Bootstrap the first operator with `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` (created on boot, password never overwritten). With `SEED_DEMO` left on and no operator configured, a demo operator is seeded at `platform@clearpath.test` / `Platform!2026` and listed on `/platform/login`.
+
+---
+
+## Automated dispute pipeline
+
+`/app/pipeline` runs the drafting step for a whole workspace and leaves two decisions to a person:
+
+1. **Scan** every tradeline. Items already in flight — an open dispute or an unapproved draft — are skipped.
+2. **Cleared to draft**: evidence strength at or above 75%, at least one supporting document, a client past onboarding, and a dispute basis long enough to cite. The pipeline drafts one letter per item with the deterministic drafter and parks it as `Ready`.
+3. **Needs a human**: everything else, with the reason attached — thin evidence, no supporting document, onboarding gaps, a balance with no open date, or a basis too thin to cite. Fix the file, run it again.
+4. **Approve & queue batch** turns waiting letters into disputes and one certified-mail package per client and bureau, exactly like the manual mailroom flow.
+
+The only remaining human steps are reviewing the exception queue and approving a batch. Nothing is ever mailed automatically.
+
+---
+
+## AI through OmniRoute
+
+OmniRoute is the only AI gateway this app talks to: one API key, no provider list, no fallback gateway. It is OpenAI-compatible, so `server/ai.js` is a single `POST /chat/completions`.
+
+| Setting | Required | Default |
+| --- | --- | --- |
+| `OMNIROUTE_API_KEY` | yes, to enable AI | — |
+| `OMNIROUTE_BASE_URL` | no | `http://localhost:20128/v1` |
+| `OMNIROUTE_MODEL` | no | `auto` (OmniRoute routes) |
+
+Two surfaces use it, both advisory and both recorded with the model that produced them:
+
+- **Drafting studio → Rewrite with AI**: sends the current letter plus its case facts to the gateway and replaces the body. The prompt forbids inventing facts, dates, balances or citations; the approved text is whatever is in the editor afterwards.
+- **Client file → Summarise case with AI**: a short summary plus up to three dispute theories grounded in the JSON case file, shown on the client page (`case_insights`).
+
+With no key, both surfaces say what to set and everything else keeps working — drafting, the pipeline, the mailroom and the portal never require a model. Note that AI actions send client case data to the configured gateway; run OmniRoute somewhere you trust.
+
+---
+
 ## What it does
 
 ### Agency workspace
@@ -54,7 +102,7 @@ Northstar is a second tenant used to demonstrate isolation. Requests are routed 
 | Clients | Search, stage filter, new-client intake, per-client case file with tradelines, disputes, documents, requests, messages and notes |
 | Disputes | Draft from a tradeline (bureau, account, theory, evidence strength), generate a letter with FCRA citations, track round, status, mailing date and response deadline |
 | Drafting studio | Pick a tradeline and a legal basis (§611 reinvestigation, §623 direct dispute, §605 obsolescence, Regulation V), review the evidence signals and confidence, edit the letter, then approve it into a dispute |
-| Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock |
+| Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock. Opening a package shows exactly what was sent — the letter text is frozen at mailing time — and the tracking number links straight to the carrier |
 | Documents | Upload with signature verification and SHA-256 hashing, verify, download, request documents from a client, see what is outstanding |
 | Mail log | Owner-only: every invitation and reset email this workspace produced, delivery status, provider errors, manual retry |
 | Audit | Append-only SHA-256 chained log, chain verification, CSV export |

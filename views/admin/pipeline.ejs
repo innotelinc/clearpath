@@ -1,0 +1,201 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Dispute pipeline</h1>
+    <p>Drafts every item the file can support, queues what it cannot, and leaves exactly two decisions to a person: review an exception, approve a batch.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/mailroom">Mailroom</a>
+    <form method="post" action="/app/pipeline/run">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <button class="btn btn-primary" type="submit" data-busy-label="Drafting…">
+        <svg><use href="#i-spark"/></svg>Run automation
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="card kpi">
+    <div class="kpi-label">Items scanned</div>
+    <div class="kpi-value"><%= scan.stats.scanned %></div>
+    <div class="kpi-meta">Tradelines across every client file</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Cleared to draft</div>
+    <div class="kpi-value"><%= scan.stats.ready %></div>
+    <div class="kpi-meta">At or above the <%= evidenceFloor %>% evidence floor</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Needs a human</div>
+    <div class="kpi-value"><%= scan.stats.needsHuman %></div>
+    <div class="kpi-meta <%= scan.stats.needsHuman ? "warn" : "" %>">Thin evidence or contradictory data</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Waiting for approval</div>
+    <div class="kpi-value"><%= ready.length %></div>
+    <div class="kpi-meta">Drafted, not mailed</div>
+  </div>
+</div>
+
+<div class="dash-grid" style="margin-top:20px">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Waiting for approval</h2><p>Auto-drafted letters — open one to edit it, or approve the batch</p></div>
+        <span class="badge <%= ready.length ? "violet" : "gray" %> no-dot"><%= ready.length %></span>
+      </div>
+      <% if (ready.length) { %>
+        <div class="list-rows">
+          <% ready.forEach((draft) => { %>
+            <a class="list-row" href="/app/studio/<%= draft.id %>" style="color:inherit">
+              <span class="badge violet no-dot"><%= draft.confidence %>%</span>
+              <div class="grow">
+                <div class="title truncate"><%= draft.client_name %> · <%= draft.creditor || "item removed" %><%= draft.mask ? ` ••${draft.mask}` : "" %></div>
+                <div class="meta"><%= bureau[draft.bureau] ? bureau[draft.bureau].short : "—" %> · <%= draft.subject %></div>
+              </div>
+              <svg style="width:16px;height:16px;color:var(--ink-4)"><use href="#i-arrow"/></svg>
+            </a>
+          <% }) %>
+        </div>
+        <div class="card-foot">
+          <p class="tiny muted" style="margin:0">
+            Approving creates the disputes and one certified-mail package per client and bureau. Posting stays in the mailroom.
+          </p>
+          <form method="post" action="/app/pipeline/approve" data-confirm="Approve <%= ready.length %> letter<%= ready.length === 1 ? '' : 's' %> and queue the packages? Nothing is mailed by this step.">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <button class="btn btn-primary" type="submit" data-busy-label="Approving…">
+              <svg><use href="#i-check"/></svg>Approve &amp; queue batch
+            </button>
+          </form>
+        </div>
+      <% } else { %>
+        <div class="card-body empty">
+          <p class="muted">No letters are waiting. Run the automation to draft everything the files support.</p>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Cleared to draft</h2><p>Evidence is strong enough and the client is active</p></div>
+        <span class="chip mono"><%= scan.candidates.length %> ready</span>
+      </div>
+      <% if (scan.candidates.length) { %>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>Client</th><th>Item</th><th>Bureau</th><th>Basis</th><th class="right">Strength</th></tr>
+            </thead>
+            <tbody>
+              <% scan.candidates.forEach((item) => { %>
+                <tr>
+                  <td>
+                    <div class="who">
+                      <span class="avatar"><%= initials(item.tradeline.client_name) %></span>
+                      <div>
+                        <div><%= item.tradeline.client_name %></div>
+                        <div class="tiny muted mono"><%= item.tradeline.client_ref %></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div><%= item.tradeline.creditor %> ••<%= item.tradeline.mask %></div>
+                    <div class="tiny muted"><%= item.tradeline.type %> · <%= item.tradeline.reason %></div>
+                  </td>
+                  <td><span class="badge blue no-dot"><%= bureau[item.tradeline.bureau] ? bureau[item.tradeline.bureau].short : item.tradeline.bureau %></span></td>
+                  <td class="tiny muted mono"><%= item.strategy %></td>
+                  <td class="right"><span class="badge <%= item.confidence >= 85 ? "teal" : "amber" %> no-dot"><%= item.confidence %>%</span></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } else { %>
+        <div class="card-body empty"><p class="muted">Everything scanable is already drafted or in flight.</p></div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Needs a human</h2><p>Why the automation stopped — fix the file, then run it again</p></div>
+        <span class="chip mono"><%= scan.exceptions.length %> in queue</span>
+      </div>
+      <% if (scan.exceptions.length) { %>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Client</th><th>Item</th><th>Why it stopped</th><th></th></tr></thead>
+            <tbody>
+              <% scan.exceptions.forEach((item) => { %>
+                <tr>
+                  <td>
+                    <div><%= item.tradeline.client_name %></div>
+                    <div class="tiny muted mono"><%= item.tradeline.client_ref %></div>
+                  </td>
+                  <td>
+                    <div><%= item.tradeline.creditor %> ••<%= item.tradeline.mask %></div>
+                    <div class="tiny muted"><%= item.tradeline.type %> · <%= item.tradeline.strength %>% strength</div>
+                  </td>
+                  <td>
+                    <div class="row" style="flex-wrap:wrap;gap:6px">
+                      <% item.reasons.forEach((reason) => { %>
+                        <span class="badge amber no-dot"><%= reason %></span>
+                      <% }) %>
+                    </div>
+                  </td>
+                  <td class="actions">
+                    <a class="btn btn-sm" href="/app/clients/<%= item.tradeline.client_id %>">Open file</a>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } else { %>
+        <div class="card-body empty"><p class="muted">Nothing is blocked. Every item either drafted or already in flight.</p></div>
+      <% } %>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Already in flight</h2><p>Open disputes and unapproved drafts are left alone</p></div>
+      </div>
+      <% if (scan.covered.length) { %>
+        <div class="list-rows">
+          <% scan.covered.slice(0, 12).forEach((item) => { %>
+            <a class="list-row" href="<%= item.href %>" style="color:inherit">
+              <span class="badge gray no-dot">Skip</span>
+              <div class="grow">
+                <div class="title truncate"><%= item.tradeline.client_name %> · <%= item.tradeline.creditor %> ••<%= item.tradeline.mask %></div>
+                <div class="meta"><%= item.label %></div>
+              </div>
+            </a>
+          <% }) %>
+        </div>
+        <% if (scan.covered.length > 12) { %>
+          <div class="card-body"><p class="tiny muted">…and <%= scan.covered.length - 12 %> more already accounted for.</p></div>
+        <% } %>
+      <% } else { %>
+        <div class="card-body empty"><p class="muted">Nothing is in flight yet.</p></div>
+      <% } %>
+    </section>
+
+    <section class="card card-pad">
+      <span class="badge <%= aiConfigured ? "violet" : "gray" %> no-dot">
+        <svg><use href="#i-spark"/></svg><%= aiConfigured ? "OmniRoute connected" : "OmniRoute not configured" %>
+      </span>
+      <p class="small muted" style="margin:12px 0 0">
+        <% if (aiConfigured) { %>
+          Letters drafted here use the deterministic rules. Open any draft to rewrite it with the model, or open a client file for a case summary — both go through the same gateway.
+        <% } else { %>
+          The pipeline runs entirely on rules, so it works without a model. Set <code>OMNIROUTE_API_KEY</code> to enable letter rewriting and case summaries.
+        <% } %>
+      </p>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/app-foot") %>

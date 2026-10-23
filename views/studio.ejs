@@ -149,6 +149,36 @@
             </div>
           </form>
 
+          <div class="stack" style="border-top:1px solid var(--line);padding-top:16px">
+            <div class="row-between">
+              <h3 class="tiny" style="text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);margin:0">AI refinement</h3>
+              <span class="badge <%= aiConfigured ? "violet" : "gray" %> no-dot">
+                <svg><use href="#i-spark"/></svg><%= aiConfigured ? aiLabel : "Not configured" %>
+              </span>
+            </div>
+            <% if (aiConfigured) { %>
+              <form method="post" action="/app/studio/<%= draft.id %>/refine" class="stack">
+                <input type="hidden" name="_csrf" value="<%= csrf %>">
+                <div class="field">
+                  <label for="s-ai">What should change?</label>
+                  <input class="input" id="s-ai" name="instruction" maxlength="300"
+                         placeholder="Shorten by a third and keep every citation">
+                  <span class="hint">The model rewrites only this letter, from this case file. It cannot add facts, dates or citations that are not here.</span>
+                </div>
+                <button class="btn" type="submit" data-busy-label="Rewriting…">
+                  <svg><use href="#i-spark"/></svg>Rewrite with AI
+                </button>
+              </form>
+            <% } else { %>
+              <p class="tiny muted" style="margin:0">
+                Set <code>OMNIROUTE_API_KEY</code> to rewrite this letter with the model. The deterministic draft above needs no key.
+              </p>
+            <% } %>
+            <% if (draft.ai_model) { %>
+              <p class="tiny muted" style="margin:0">Last rewritten by <span class="mono"><%= draft.ai_model %></span> on <%= fmtDateTime(draft.ai_refined_at) %>. The text above is what gets approved.</p>
+            <% } %>
+          </div>
+
           <div>
             <h3 class="tiny" style="text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);margin-bottom:8px">Authority cited</h3>
             <div class="row" style="flex-wrap:wrap;gap:6px">

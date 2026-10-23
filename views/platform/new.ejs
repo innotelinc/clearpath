@@ -1,0 +1,72 @@
+<%- include("../partials/platform-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Provision a workspace</h1>
+    <p>Creates the tenant and its first owner in one step. The owner gets a sign-in email with a temporary password.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/platform">All workspaces</a>
+  </div>
+</div>
+
+<form method="post" action="/platform/tenants">
+  <input type="hidden" name="_csrf" value="<%= csrf %>">
+  <div class="grid-2">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>The workspace</h2><p>Branding can be changed later from the tenant's own settings</p></div>
+      </div>
+      <div class="card-body stack">
+        <div class="field">
+          <label for="p-name">Agency name</label>
+          <input class="input" id="p-name" name="name" required maxlength="80" value="<%= form.name %>" placeholder="Northstar Credit Group">
+        </div>
+        <div class="field">
+          <label for="p-brand">Client-facing brand</label>
+          <input class="input" id="p-brand" name="brand_name" maxlength="80" value="<%= form.brand_name %>" placeholder="Defaults to the agency name">
+          <span class="hint">Shown on the client portal and letter PDFs.</span>
+        </div>
+        <div class="field">
+          <label for="p-slug">Slug</label>
+          <input class="input" id="p-slug" name="slug" maxlength="40" value="<%= form.slug %>" placeholder="northstar">
+          <span class="hint">Lowercase letters, numbers and dashes. Generated from the name when left blank.</span>
+        </div>
+        <div class="field">
+          <label for="p-domain">Custom domain</label>
+          <input class="input" id="p-domain" name="domain" maxlength="120" value="<%= form.domain %>" placeholder="northstar.clearpath.test">
+          <span class="hint">Optional. Requests on this host resolve to this tenant; everything else falls back to the first workspace.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>First owner</h2><p>Owns billing, branding, team and every client in the workspace</p></div>
+      </div>
+      <div class="card-body stack">
+        <div class="field">
+          <label for="p-owner">Full name</label>
+          <input class="input" id="p-owner" name="owner_name" required maxlength="80" value="<%= form.owner_name %>" placeholder="Jordan Lee">
+        </div>
+        <div class="field">
+          <label for="p-email">Work email</label>
+          <input class="input" id="p-email" name="owner_email" type="email" required maxlength="160" value="<%= form.owner_email %>" placeholder="owner@agency.com">
+          <span class="hint">The invitation is queued in the tenant's mail log, and the temporary password is shown once on the next screen when no mail provider is configured.</span>
+        </div>
+        <div class="notice notice-info">
+          <svg><use href="#i-lock"/></svg>
+          <div class="grow tiny">
+            The owner is forced to choose a new password on their first sign-in. Nothing else about the workspace is created until they do.
+          </div>
+        </div>
+      </div>
+      <div class="card-foot">
+        <a class="btn btn-ghost" href="/platform">Cancel</a>
+        <button class="btn btn-primary" type="submit" data-busy-label="Provisioning…">Create workspace &amp; invite owner</button>
+      </div>
+    </section>
+  </div>
+</form>
+
+<%- include("../partials/platform-foot") %>

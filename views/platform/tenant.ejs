@@ -1,0 +1,197 @@
+<%- include("../partials/platform-head", { title }) %>
+
+<div class="page-head">
+  <div class="detail-title">
+    <span class="avatar lg"><%= initials(tenant.name) %></span>
+    <div>
+      <h1><%= tenant.name %></h1>
+      <div class="meta">
+        <span class="mono"><%= tenant.slug %></span>
+        <%= tenant.domain ? ` · ${tenant.domain}` : "" %> · created <%= fmtDate(tenant.created_at) %>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <% if (tenant.status === "suspended") { %>
+          <span class="badge rose">Suspended</span>
+        <% } else { %>
+          <span class="badge teal">Active</span>
+        <% } %>
+        <span class="badge blue no-dot"><%= usage.clients %> clients</span>
+        <span class="badge <%= usage.openDisputes ? "amber" : "gray" %> no-dot"><%= usage.openDisputes %> open disputes</span>
+      </div>
+    </div>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/platform">All workspaces</a>
+    <% if (tenant.status === "suspended") { %>
+      <form method="post" action="/platform/tenants/<%= tenant.id %>/reactivate" data-confirm="Reactivate <%= tenant.name %>? Sign-in is restored immediately.">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <button class="btn btn-primary" type="submit">Reactivate workspace</button>
+      </form>
+    <% } else { %>
+      <form method="post" action="/platform/tenants/<%= tenant.id %>/suspend" data-confirm="Suspend <%= tenant.name %>? Every signed-in user is signed out and nobody can sign in until you reactivate.">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="row" style="gap:8px">
+          <input class="input" name="note" maxlength="240" placeholder="Reason (optional, logged)">
+          <button class="btn btn-danger" type="submit" data-busy-label="Suspending…">Suspend</button>
+        </div>
+      </form>
+    <% } %>
+  </div>
+</div>
+
+<% if (tenant.status === "suspended") { %>
+  <div class="notice notice-info" role="status">
+    <svg><use href="#i-lock"/></svg>
+    <div class="grow">
+      <strong>Workspace suspended<%= tenant.suspended_at ? ` ${fmtDateTime(tenant.suspended_at)}` : "" %>.</strong>
+      <%= tenant.suspended_note || "No reason recorded." %>
+      Sign-in and the client portal are blocked and existing sessions were dropped; the data is untouched.
+    </div>
+  </div>
+<% } %>
+
+<% if (typeof invite !== "undefined" && invite) { %>
+  <div class="notice notice-ok" role="status">
+    <svg><use href="#i-mail"/></svg>
+    <div class="grow">
+      <strong>Owner access created for <%= invite.name %>.</strong> <%= invite.delivery %>
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+        <span class="chip mono"><%= invite.email %></span>
+        <% if (invite.password) { %>
+          <span class="chip mono"><%= invite.password %></span>
+          <button class="btn btn-sm" type="button" data-copy="<%= invite.password %>">Copy password</button>
+        <% } %>
+      </div>
+      <p class="tiny muted" style="margin-top:8px">
+        <% if (invite.password) { %>
+          No mail provider is configured, so this temporary password is shown once — pass it on through a channel you trust.
+        <% } else { %>
+          They choose their own password the first time they sign in.
+        <% } %>
+      </p>
+    </div>
+  </div>
+<% } %>
+
+<div class="kpis">
+  <div class="card kpi">
+    <div class="kpi-label">Clients</div>
+    <div class="kpi-value"><%= usage.clients %></div>
+    <div class="kpi-meta"><%= usage.portalAccounts %> portal accounts</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Staff seats</div>
+    <div class="kpi-value"><%= usage.seats %></div>
+    <div class="kpi-meta"><%= team.length %> accounts in the workspace</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Open disputes</div>
+    <div class="kpi-value"><%= usage.openDisputes %></div>
+    <div class="kpi-meta"><%= usage.mailed %> mailed or awaiting a bureau</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Documents</div>
+    <div class="kpi-value"><%= usage.documents %></div>
+    <div class="kpi-meta"><%= usage.packages %> mailing packages</div>
+  </div>
+</div>
+
+<div class="dash-grid" style="margin-top:20px">
+  <section class="card">
+    <div class="card-head">
+      <div><h2>Client roster</h2><p>Names and case state only — dispute detail stays inside the tenant</p></div>
+      <span class="chip mono"><%= clients.length %> clients</span>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Ref</th>
+            <th>Client</th>
+            <th>Stage</th>
+            <th class="right">TU / EX / EQ</th>
+            <th class="right">Open</th>
+            <th class="right">Docs</th>
+            <th>Portal</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% clients.forEach((row) => { %>
+            <tr>
+              <td class="mono tiny"><%= row.ref %></td>
+              <td>
+                <div class="who">
+                  <span class="avatar"><%= initials(row.name) %></span>
+                  <div>
+                    <div><%= row.name %></div>
+                    <div class="tiny muted"><%= row.email %></div>
+                  </div>
+                </div>
+              </td>
+              <td><span class="badge <%= stage(row.stage) %>"><%= row.stage %></span></td>
+              <td class="right mono tiny"><%= row.tu %> / <%= row.ex %> / <%= row.eq %></td>
+              <td class="right num"><%= row.open_disputes %></td>
+              <td class="right num"><%= row.documents %></td>
+              <td><span class="badge <%= row.portal_status === "Active" ? "teal" : "gray" %> no-dot"><%= row.portal_status %></span></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% if (!clients.length) { %>
+      <div class="card-body empty"><p class="muted">This workspace has not added a client yet.</p></div>
+    <% } %>
+  </section>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Team</h2><p>Owner and specialist accounts</p></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Person</th><th>Role</th><th>Last sign-in</th></tr></thead>
+          <tbody>
+            <% team.filter((person) => person.role !== "client").forEach((person) => { %>
+              <tr>
+                <td>
+                  <div class="who">
+                    <span class="avatar"><%= initials(person.name) %></span>
+                    <div>
+                      <div><%= person.name %></div>
+                      <div class="tiny muted"><%= person.email %></div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span class="badge <%= person.role === "owner" ? "violet" : "gray" %> no-dot"><%= person.role %></span>
+                </td>
+                <td class="tiny muted"><%= person.last_login_at ? fmtDateTime(person.last_login_at) : "Never" %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Invite another owner</h2><p>Same access as the first one</p></div>
+      </div>
+      <form class="card-body stack" method="post" action="/platform/tenants/<%= tenant.id %>/owner">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="field">
+          <label for="o-name">Full name</label>
+          <input class="input" id="o-name" name="owner_name" required maxlength="80" placeholder="Alex Rivera">
+        </div>
+        <div class="field">
+          <label for="o-email">Work email</label>
+          <input class="input" id="o-email" name="owner_email" type="email" required maxlength="160" placeholder="alex@agency.com">
+        </div>
+        <button class="btn" type="submit" data-busy-label="Inviting…"><svg><use href="#i-plus"/></svg>Invite owner</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/platform-foot") %>

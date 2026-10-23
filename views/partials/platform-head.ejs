@@ -1,0 +1,80 @@
+<%
+  const nav = [
+    { key: "tenants", label: "Workspaces", href: "/platform", icon: "i-bank" },
+    { key: "new", label: "Provision workspace", href: "/platform/tenants/new", icon: "i-plus" }
+  ];
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · Platform console · Clearpath</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:#0f172a;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("icons") %>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/platform">
+        <span class="brand-mark">CP</span>
+        <span>
+          <span class="brand-name">Clearpath</span>
+          <span class="brand-sub" style="display:block">Platform console</span>
+        </span>
+      </a>
+
+      <div class="side-nav" aria-label="Platform">
+        <% nav.forEach((item) => { %>
+          <a class="nav-item <%= page === item.key ? 'is-active' : '' %>" href="<%= item.href %>"
+             <%= page === item.key ? 'aria-current="page"' : '' %>>
+            <svg><use href="#<%= item.icon %>"/></svg>
+            <span><%= item.label %></span>
+          </a>
+        <% }) %>
+      </div>
+
+      <div class="side-group">Above the tenants</div>
+      <div class="side-foot">
+        <div class="side-user">
+          <span class="avatar dark"><%= initials(platformAdmin.name) %></span>
+          <div class="grow">
+            <div class="name truncate"><%= platformAdmin.name %></div>
+            <div class="role">platform operator</div>
+          </div>
+        </div>
+        <form class="side-logout" method="post" action="/platform/logout">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button type="submit"><svg><use href="#i-out"/></svg>Sign out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" type="button" data-toggle="sidebar" aria-expanded="false" aria-controls="sidebar" aria-label="Menu">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+        <div class="crumb">Platform <span aria-hidden="true">/</span> <strong><%= title %></strong></div>
+        <div class="spacer"></div>
+        <span class="badge gray no-dot mono"><%= platformAdmin.email %></span>
+      </header>
+
+      <main class="content" id="main">
+        <% if (notice) { %>
+          <div class="notice notice-ok" role="status">
+            <svg><use href="#i-check"/></svg>
+            <div class="grow"><%= notice %></div>
+            <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss"><svg><use href="#i-x"/></svg></button>
+          </div>
+        <% } %>
+        <% if (typeof error !== "undefined" && error) { %>
+          <div class="notice notice-error" role="alert">
+            <svg><use href="#i-alert"/></svg>
+            <div class="grow"><%= error %></div>
+          </div>
+        <% } %>

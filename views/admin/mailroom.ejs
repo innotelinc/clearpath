@@ -85,17 +85,18 @@
                 <td><span class="badge <%= statusClass(p.status) %>"><%= p.status %></span></td>
                 <td class="small">
                   <% if (p.tracking) { %>
-                    <span class="mono"><%= p.tracking %></span>
-                    <div class="tiny muted"><%= p.eta || "" %></div>
+                    <a class="mono" href="<%= trackingUrl(p.tracking) %>" target="_blank" rel="noopener"><%= p.tracking %></a>
+                    <div class="tiny muted"><a href="<%= trackingUrl(p.tracking) %>" target="_blank" rel="noopener">Track ↗</a><%= p.eta ? ` · ${p.eta}` : "" %></div>
                   <% } else { %>
                     <span class="muted">—</span>
                   <% } %>
                 </td>
                 <td class="actions">
+                  <a class="btn btn-sm" href="/app/mailroom/<%= p.id %>">View</a>
                   <% if (p.status === "Ready") { %>
                     <button class="btn btn-sm" type="button" data-open="mail-<%= p.id %>">Mark mailed</button>
-                  <% } else { %>
-                    <span class="tiny muted"><%= p.eta || "In transit" %></span>
+                  <% } else if (p.sent_at) { %>
+                    <div class="tiny muted"><%= fmtDate(p.sent_at) %></div>
                   <% } %>
                 </td>
               </tr>

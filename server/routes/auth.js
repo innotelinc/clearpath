@@ -43,6 +43,15 @@ router.post("/login", (req, res) => {
   const tenant = tenantForHost(req.headers.host);
   const key = `${req.ip}:${email.toLowerCase()}`;
 
+  if (tenant.status === "suspended") {
+    return res.status(403).render("login", {
+      title: "Workspace suspended", tenant, page: "login", mode, email,
+      error: "This workspace is suspended by the platform operator. No one can sign in until it is reactivated.",
+      notice: "",
+      next: safeNext(req.body.next, "/app")
+    });
+  }
+
   if (throttleLogin(key)) {
     return res.status(429).render("login", {
       title: "Too many attempts", tenant, page: "login", mode, email,
@@ -72,6 +81,15 @@ router.post("/portal/login", (req, res) => {
   const email = String(req.body.email || "").trim();
   const tenant = tenantForHost(req.headers.host);
   const key = `${req.ip}:portal:${email.toLowerCase()}`;
+
+  if (tenant.status === "suspended") {
+    return res.status(403).render("login", {
+      title: "Workspace suspended", tenant, page: "login", mode, email,
+      error: "This portal is suspended by the platform operator. No one can sign in until it is reactivated.",
+      notice: "",
+      next: "/portal"
+    });
+  }
 
   if (throttleLogin(key)) {
     return res.status(429).render("login", {

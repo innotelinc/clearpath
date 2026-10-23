@@ -242,6 +242,52 @@ CREATE TABLE IF NOT EXISTS drafts (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS platform_admins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  password_hash TEXT NOT NULL,
+  password_salt TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_login_at TEXT
+);
+
+/* Platform operators are not tenant users: their sessions live in their own
+   table so a workspace suspension can never lock the operator out. */
+CREATE TABLE IF NOT EXISTS platform_sessions (
+  id TEXT PRIMARY KEY,
+  admin_id INTEGER NOT NULL REFERENCES platform_admins(id) ON DELETE CASCADE,
+  csrf TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+/* Exactly what went into the envelope, captured at mailing time. The disputes
+   can keep moving after a package is posted; this snapshot cannot. */
+CREATE TABLE IF NOT EXISTS package_letters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+  dispute_id INTEGER REFERENCES disputes(id) ON DELETE SET NULL,
+  ref TEXT NOT NULL,
+  account TEXT NOT NULL,
+  bureau TEXT NOT NULL,
+  body TEXT NOT NULL,
+  captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (package_id, dispute_id)
+);
+
+CREATE TABLE IF NOT EXISTS case_insights (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  summary TEXT NOT NULL,
+  theories TEXT NOT NULL DEFAULT '[]',
+  model TEXT,
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_disputes_tenant ON disputes (tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents (tenant_id, client_id);
@@ -251,6 +297,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions (expires_at);
 CREATE INDEX IF NOT EXISTS idx_resets_token ON password_resets (token_hash);
 CREATE INDEX IF NOT EXISTS idx_emails_tenant ON emails (tenant_id, id);
 CREATE INDEX IF NOT EXISTS idx_drafts_tenant ON drafts (tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_platform_sessions_expiry ON platform_sessions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_insights_client ON case_insights (tenant_id, client_id, id);
+CREATE INDEX IF NOT EXISTS idx_package_letters ON package_letters (tenant_id, package_id);
 `;
 
 db.exec(schema);
@@ -265,6 +314,14 @@ function ensureColumn(table, column, definition) {
 
 ensureColumn("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("disputes", "letter_body", "TEXT");
+/* Workspace lifecycle, driven from the platform console. */
+ensureColumn("tenants", "status", "TEXT NOT NULL DEFAULT 'active'");
+ensureColumn("tenants", "suspended_at", "TEXT");
+ensureColumn("tenants", "suspended_note", "TEXT");
+/* Which gateway/model produced a draft, so an AI-edited letter stays traceable. */
+ensureColumn("drafts", "ai_model", "TEXT");
+ensureColumn("drafts", "ai_refined_at", "TEXT");
+ensureColumn("packages", "sent_at", "TEXT");
 try {
   db.exec("PRAGMA busy_timeout = 5000;");
 } catch { /* older SQLite builds */ }
@@ -540,6 +597,91 @@ export function seedDemo() {
     .forEach(([tenantId, actor, action, target, when]) => audit(tenantId, actor, action, target, when));
 
   return true;
+}
+
+/* ---------------- platform console ---------------- */
+
+/**
+ * Bootstrap the platform operator account.
+ *
+ * PLATFORM_ADMIN_EMAIL + PLATFORM_ADMIN_PASSWORD create the account on boot.
+ * With SEED_DEMO enabled a demo operator is seeded instead so the console is
+ * usable out of the box. Nothing is created when a real operator already exists.
+ */
+export function ensurePlatformAdmin() {
+  const email = String(process.env.PLATFORM_ADMIN_EMAIL || "").trim().toLowerCase();
+  const password = String(process.env.PLATFORM_ADMIN_PASSWORD || "");
+  const name = String(process.env.PLATFORM_ADMIN_NAME || "Platform admin").trim().slice(0, 80);
+  const total = db.prepare("SELECT COUNT(*) AS n FROM platform_admins").get().n;
+
+  if (email && password) {
+    if (db.prepare("SELECT id FROM platform_admins WHERE email = ?").get(email)) {
+      return { created: false, email };
+    }
+    const { hash, salt } = hashPassword(password);
+    db.prepare(
+      "INSERT INTO platform_admins (email, name, password_hash, password_salt) VALUES (?, ?, ?, ?)"
+    ).run(email, name, hash, salt);
+    return { created: true, email, demo: false };
+  }
+
+  if (process.env.SEED_DEMO !== "0" && total === 0) {
+    const { hash, salt } = hashPassword("Platform!2026");
+    db.prepare(
+      "INSERT INTO platform_admins (email, name, password_hash, password_salt) VALUES (?, ?, ?, ?)"
+    ).run("platform@clearpath.test", "Platform admin", hash, salt);
+    return { created: true, email: "platform@clearpath.test", demo: true };
+  }
+  return { created: false, email: null };
+}
+
+export function listTenants() {
+  return db.prepare("SELECT * FROM tenants ORDER BY status = 'active' DESC, name").all();
+}
+
+/** Counts shown in the platform tenant list and drill-down. */
+export function tenantUsage(tenantId) {
+  const one = (sql) => db.prepare(sql).get(tenantId)?.n || 0;
+  return {
+    clients: one("SELECT COUNT(*) AS n FROM clients WHERE tenant_id = ?"),
+    seats: one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role IN ('owner','specialist')"),
+    portalAccounts: one("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND role = 'client'"),
+    openDisputes: one(
+      "SELECT COUNT(*) AS n FROM disputes WHERE tenant_id = ? AND status NOT IN ('Deleted','Closed')"
+    ),
+    mailed: one(
+      "SELECT COUNT(*) AS n FROM disputes WHERE tenant_id = ? AND status IN ('Mailed','Awaiting response','Escalated')"
+    ),
+    documents: one("SELECT COUNT(*) AS n FROM documents WHERE tenant_id = ?"),
+    packages: one("SELECT COUNT(*) AS n FROM packages WHERE tenant_id = ?"),
+    lastActivity: db.prepare("SELECT MAX(created_at) AS at FROM audit_log WHERE tenant_id = ?").get(tenantId)?.at || null
+  };
+}
+
+export function tenantTeam(tenantId) {
+  return db
+    .prepare(
+      "SELECT id, name, email, role, last_login_at, must_change_password FROM users WHERE tenant_id = ? ORDER BY role, name"
+    )
+    .all(tenantId);
+}
+
+/** Client roster for the platform drill-down, with dispute counts per file. */
+export function tenantClients(tenantId) {
+  return db
+    .prepare(
+      `SELECT c.*,
+              (SELECT COUNT(*) FROM disputes d WHERE d.client_id = c.id AND d.status NOT IN ('Deleted','Closed')) AS open_disputes,
+              (SELECT COUNT(*) FROM documents doc WHERE doc.client_id = c.id) AS documents
+       FROM clients c WHERE c.tenant_id = ? ORDER BY c.name`
+    )
+    .all(tenantId);
+}
+
+export function latestInsight(tenantId, clientId) {
+  return db
+    .prepare("SELECT * FROM case_insights WHERE tenant_id = ? AND client_id = ? ORDER BY id DESC LIMIT 1")
+    .get(tenantId, clientId);
 }
 
 export { DATA_DIR, DB_PATH };

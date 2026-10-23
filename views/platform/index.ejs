@@ -1,0 +1,92 @@
+<%- include("../partials/platform-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Workspaces</h1>
+    <p>Every agency on this deployment, with what it actually uses. Open one to see its team and client roster.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="/platform/tenants/new"><svg><use href="#i-plus"/></svg>Provision workspace</a>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="card kpi">
+    <div class="kpi-label">Workspaces</div>
+    <div class="kpi-value"><%= totals.tenants %></div>
+    <div class="kpi-meta"><%= totals.active %> active · <%= totals.suspended %> suspended</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Clients</div>
+    <div class="kpi-value"><%= totals.clients %></div>
+    <div class="kpi-meta">Across every tenant</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Staff seats</div>
+    <div class="kpi-value"><%= totals.seats %></div>
+    <div class="kpi-meta">Owners and specialists</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Open disputes</div>
+    <div class="kpi-value"><%= totals.openDisputes %></div>
+    <div class="kpi-meta"><%= totals.documents %> documents on file</div>
+  </div>
+</div>
+
+<section class="card" style="margin-top:20px">
+  <div class="card-head">
+    <div><h2>Tenant list</h2><p>Usage is counted live from each workspace's own records</p></div>
+    <span class="chip mono"><%= totals.tenants %> total</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Workspace</th>
+          <th>Status</th>
+          <th class="right">Clients</th>
+          <th class="right">Seats</th>
+          <th class="right">Open disputes</th>
+          <th class="right">Documents</th>
+          <th>Last activity</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% tenants.forEach((tenant) => { %>
+          <tr>
+            <td>
+              <div class="who">
+                <span class="avatar"><%= initials(tenant.name) %></span>
+                <div>
+                  <div><a class="link" href="/platform/tenants/<%= tenant.id %>"><%= tenant.name %></a></div>
+                  <div class="tiny muted mono"><%= tenant.slug %><%= tenant.domain ? ` · ${tenant.domain}` : "" %></div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <% if (tenant.status === "suspended") { %>
+                <span class="badge rose">Suspended</span>
+              <% } else { %>
+                <span class="badge teal">Active</span>
+              <% } %>
+            </td>
+            <td class="right num"><%= tenant.usage.clients %></td>
+            <td class="right num"><%= tenant.usage.seats %></td>
+            <td class="right num"><%= tenant.usage.openDisputes %></td>
+            <td class="right num"><%= tenant.usage.documents %></td>
+            <td class="tiny muted"><%= tenant.usage.lastActivity ? fmtDateTime(tenant.usage.lastActivity) : "No activity yet" %></td>
+            <td class="actions"><a class="btn btn-sm" href="/platform/tenants/<%= tenant.id %>">Open</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+  <% if (!tenants.length) { %>
+    <div class="card-body empty">
+      <p class="muted">No workspaces yet. Provision the first one to create its owner account.</p>
+    </div>
+  <% } %>
+</section>
+
+<%- include("../partials/platform-foot") %>

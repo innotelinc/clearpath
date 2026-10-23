@@ -4,13 +4,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
-import { db, seedDemo, tenantForHost, tenantStats } from "./db.js";
+import { db, ensurePlatformAdmin, seedDemo, tenantForHost, tenantStats } from "./db.js";
+import { aiConfigured, aiLabel } from "./ai.js";
 import { retryPending } from "./mail.js";
-import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass } from "./util.js";
+import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass, trackingUrl } from "./util.js";
 import publicRoutes from "./routes/public.js";
 import authRoutes from "./routes/auth.js";
 import adminRoutes from "./routes/admin.js";
 import portalRoutes from "./routes/portal.js";
+import platformRoutes from "./routes/platform.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -18,6 +20,13 @@ const root = path.resolve(here, "..");
 if (process.env.SEED_DEMO !== "0") {
   const seeded = seedDemo();
   if (seeded) console.log("Clearpath: seeded demo tenants and records");
+}
+
+const platformAdmin = ensurePlatformAdmin();
+if (platformAdmin.created) {
+  console.log(
+    `Clearpath: platform operator created for ${platformAdmin.email}${platformAdmin.demo ? " (demo password Platform!2026 — set PLATFORM_ADMIN_EMAIL/PASSWORD in production)" : ""}`
+  );
 }
 
 const app = express();
@@ -83,6 +92,7 @@ app.use((req, res, next) => {
   res.locals.bureau = bureau;
   res.locals.money = money;
   res.locals.initials = initials;
+  res.locals.trackingUrl = trackingUrl;
   res.locals.statusClass = statusClass;
   res.locals.fmtDate = fmtDate;
   res.locals.fmtDateTime = fmtDateTime;
@@ -90,6 +100,8 @@ app.use((req, res, next) => {
   res.locals.csrf = res.locals.csrf || "";
   res.locals.hostTenant = res.locals.tenant || tenantForHost(req.headers.host);
   res.locals.demoMode = process.env.SEED_DEMO !== "0";
+  res.locals.aiConfigured = aiConfigured;
+  res.locals.aiLabel = aiLabel();
   res.locals.navCounts =
     res.locals.tenant && res.locals.user && res.locals.user.role !== "client"
       ? tenantStats(res.locals.tenant.id)
@@ -103,6 +115,7 @@ app.use(["/app/documents", "/portal/documents"], upload.single("file"));
 
 app.use(checkCsrf);
 
+app.use("/platform", platformRoutes);
 app.use("/", publicRoutes);
 app.use("/", authRoutes);
 app.use("/app", requireUser(["owner", "specialist"]), adminRoutes);

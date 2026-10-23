@@ -1,5 +1,6 @@
 import { db, getTenantById } from "./db.js";
 import { randomToken, safeEqual, sha256, verifyPassword } from "./security.js";
+import { findPlatformSession, PLATFORM_COOKIE } from "./platform-auth.js";
 
 const COOKIE = "cp_session";
 const CSRF_COOKIE = "cp_csrf";
@@ -70,7 +71,7 @@ export function attachSession(req, res, next) {
       .prepare(
         `SELECT s.id AS session_id, s.csrf, s.expires_at, u.*, t.slug AS tenant_slug, t.name AS tenant_name,
                 t.brand_name, t.accent, t.logo, t.portal_name, t.support_email, t.support_phone, t.address,
-                t.tagline, t.welcome, t.domain
+                t.tagline, t.welcome, t.domain, t.status AS tenant_status
          FROM sessions s
          JOIN users u ON u.id = s.user_id
          JOIN tenants t ON t.id = u.tenant_id
@@ -78,7 +79,9 @@ export function attachSession(req, res, next) {
       )
       .get(sha256(token));
 
-    if (row && new Date(row.expires_at) > new Date()) {
+    // A suspended workspace behaves as signed out: nothing loads, and the
+    // session is dropped so re-activation cannot silently resume it.
+    if (row && new Date(row.expires_at) > new Date() && row.tenant_status !== "suspended") {
       req.session = { id: row.session_id, csrf: row.csrf };
       req.user = {
         id: row.id,
@@ -95,10 +98,23 @@ export function attachSession(req, res, next) {
       res.locals.csrf = row.csrf;
     } else if (row) {
       db.prepare("DELETE FROM sessions WHERE id = ?").run(row.session_id);
+      if (row.tenant_status === "suspended") res.locals.suspendedTenant = row.tenant_name;
     }
   }
 
-  const desired = req.session ? req.session.csrf : req.cookies[CSRF_COOKIE] || randomToken(24);
+  let platformCsrf = "";
+  if (!req.user) {
+    const platform = findPlatformSession(req.cookies[PLATFORM_COOKIE]);
+    if (platform) {
+      req.platformAdmin = platform.admin;
+      res.locals.platformAdmin = platform.admin;
+      platformCsrf = platform.csrf;
+    }
+  }
+
+  const desired = req.session
+    ? req.session.csrf
+    : platformCsrf || req.cookies[CSRF_COOKIE] || randomToken(24);
   if (req.cookies[CSRF_COOKIE] !== desired) {
     const existing = res.getHeader("Set-Cookie");
     const list = existing ? (Array.isArray(existing) ? existing : [existing]) : [];

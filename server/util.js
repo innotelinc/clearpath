@@ -82,6 +82,19 @@ export const safeNext = (value, fallback) => {
   return next;
 };
 
+/**
+ * Public tracking link for a carrier barcode. Certified mail and Priority mail
+ * use USPS; the UPS and FedEx patterns are recognised so an imported number
+ * still links to the right place. Returns "" when there is no number.
+ */
+export function trackingUrl(tracking) {
+  const value = String(tracking || "").replace(/[\s-]+/g, "").toUpperCase();
+  if (!value) return "";
+  if (/^1Z[0-9A-Z]{16}$/.test(value)) return `https://www.ups.com/track?loc=en_US&tracknum=${value}`;
+  if (/^[0-9]{12}$/.test(value)) return `https://www.fedex.com/fedextrack/?trknbr=${value}`;
+  return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${encodeURIComponent(value)}`;
+}
+
 export function sendPdf(res, filename, buffer) {
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${filename.replace(/[^a-zA-Z0-9_.-]+/g, "-")}"`);

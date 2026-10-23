@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Platform console · Clearpath</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:#0f172a;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("../partials/icons") %>
+  <div class="auth-page">
+    <aside class="auth-aside">
+      <a class="brand" href="/" style="color:#fff">
+        <span class="brand-mark">CP</span>
+        <span>
+          <span class="brand-name">Clearpath</span>
+          <span class="brand-sub" style="display:block;color:#8698b3">Platform console</span>
+        </span>
+      </a>
+      <div>
+        <h2>The layer above the workspaces.</h2>
+        <p>
+          Provision an agency, invite its first owner, watch what each workspace uses, and suspend a
+          tenant without touching its data. Operators never browse client dispute detail from here.
+        </p>
+        <ul>
+          <li><svg><use href="#i-bank"/></svg><span>Every workspace and its usage</span></li>
+          <li><svg><use href="#i-plus"/></svg><span>Create a tenant with its first owner</span></li>
+          <li><svg><use href="#i-lock"/></svg><span>Suspend or reactivate access</span></li>
+          <li><svg><use href="#i-users"/></svg><span>Drill down to each tenant's clients</span></li>
+        </ul>
+      </div>
+      <p class="foot">© <%= new Date().getFullYear() %> Denovo Credit · Clearpath platform</p>
+    </aside>
+
+    <main class="auth-main" id="main">
+      <div class="auth-card">
+        <a class="brand" href="/">
+          <span class="brand-mark accent">CP</span>
+          <span class="brand-name">Platform console</span>
+        </a>
+        <h1>Operator sign-in</h1>
+        <p>This area sits above every agency workspace. Accounts here are provisioned by the deployment, not by a tenant.</p>
+
+        <% if (error) { %>
+          <div class="notice notice-error" style="margin-top:20px" role="alert">
+            <svg><use href="#i-alert"/></svg>
+            <div><%= error %></div>
+          </div>
+        <% } %>
+
+        <form method="post" action="/platform/login" autocomplete="on">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <input type="hidden" name="next" value="<%= next %>">
+          <div class="field">
+            <label for="email">Operator email</label>
+            <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="username"
+                   value="<%= email %>" placeholder="operator@clearpath.test" required autofocus>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div style="position:relative">
+              <input class="input" id="password" name="password" type="password" autocomplete="current-password"
+                     placeholder="Your password" required style="padding-right:64px">
+              <button class="btn btn-ghost btn-sm" type="button" data-reveal="password" aria-pressed="false"
+                      style="position:absolute;right:4px;top:4px;min-height:32px">Show</button>
+            </div>
+          </div>
+          <button class="btn btn-dark btn-block btn-lg" type="submit" data-busy-label="Signing in…">Sign in</button>
+        </form>
+
+        <div class="auth-links">
+          <a href="/login">Agency sign in</a>
+          <a href="/">Marketing site</a>
+        </div>
+
+        <% if (demoEmail) { %>
+          <div class="demo-creds">
+            <strong>Demo operator · seeded database</strong>
+            <div class="row"><span>Email</span><code><%= demoEmail %></code></div>
+            <div class="row"><span>Password</span><code>Platform!2026</code></div>
+            <p class="tiny muted" style="margin-top:8px">
+              Set <code>PLATFORM_ADMIN_EMAIL</code> and <code>PLATFORM_ADMIN_PASSWORD</code>, or <code>SEED_DEMO=0</code>, before going to production.
+            </p>
+          </div>
+        <% } %>
+      </div>
+    </main>
+  </div>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>
