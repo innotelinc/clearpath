@@ -220,6 +220,12 @@ export function letterBlocks({ tenant, client, dispute, tradeline }) {
     }[item.type] ||
     "The information reported for this account is inaccurate or incomplete and does not reflect my records.";
 
+  // A letter approved in the drafting studio carries its own edited text.
+  const approved = String(dispute.letter_body || "").trim();
+  const approvedBody = approved
+    ? approved.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean)
+    : null;
+
   return {
     bureau,
     date: todayLong(),
@@ -228,7 +234,7 @@ export function letterBlocks({ tenant, client, dispute, tradeline }) {
     consumer: `Consumer: ${client.name}`,
     contact: `Contact: ${client.email}${client.phone ? " · " + client.phone : ""}`,
     salutation: "To Whom It May Concern:",
-    body: [
+    body: approvedBody || [
       `I am writing to dispute information in my ${bureau.name} credit file that I believe is inaccurate or incomplete. Please conduct a reasonable reinvestigation of the item identified below and correct or delete it as the evidence supports.`,
       paragraph,
       "If the information cannot be verified as accurate and complete, please delete the tradeline and send me an updated copy of my file. I have attached documentation supporting this request; please retain it with the dispute record.",

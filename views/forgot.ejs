@@ -1,0 +1,89 @@
+<%
+  const brand = tenant || hostTenant;
+  const isClient = mode === "client";
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("partials/icons") %>
+  <div class="auth-page">
+    <aside class="auth-aside">
+      <a class="brand" href="/" style="color:#fff">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block;color:#8698b3">Clearpath platform</span>
+        </span>
+      </a>
+      <div>
+        <h2>Back into your file.</h2>
+        <p>We email a single-use link. It expires in an hour, and using it signs out every other device on the account.</p>
+      </div>
+      <p class="foot">© <%= new Date().getFullYear() %> Denovo Credit · denovocredit.com</p>
+    </aside>
+
+    <main class="auth-main" id="main">
+      <div class="auth-card">
+        <a class="brand" href="/">
+          <span class="brand-mark accent"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+          <span class="brand-name">Clearpath</span>
+        </a>
+
+        <% if (sent) { %>
+          <h1>Check your inbox</h1>
+          <p>
+            If that address belongs to a <%= isClient ? "client portal" : "workspace" %> account on this
+            <%= siteName %> deployment, a reset link is on its way. Nothing else changes until you use it.
+          </p>
+          <div class="notice notice-ok" style="margin-top:20px">
+            <svg><use href="#i-mail"/></svg>
+            <div>No email after a few minutes? Check spam, then ask your administrator to resend the invitation.</div>
+          </div>
+          <div class="auth-links" style="margin-top:22px">
+            <a href="<%= isClient ? '/portal/login' : '/login' %>">Back to sign in</a>
+            <a href="/forgot?mode=<%= isClient ? 'client' : 'agency' %>">Send another link</a>
+          </div>
+        <% } else { %>
+          <h1>Reset your password</h1>
+          <p>Enter the email on your <%= siteName %> <%= isClient ? "portal" : "workspace" %> account and we will send a link to choose a new password.</p>
+
+          <% if (error) { %>
+            <div class="notice notice-error" style="margin-top:20px" role="alert">
+              <svg><use href="#i-alert"/></svg>
+              <div><%= error %></div>
+            </div>
+          <% } %>
+
+          <form method="post" action="/forgot" autocomplete="on">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <input type="hidden" name="mode" value="<%= mode %>">
+            <div class="field">
+              <label for="email">Email</label>
+              <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="username"
+                     placeholder="you@agency.com" required autofocus>
+            </div>
+            <button class="btn btn-primary btn-block btn-lg" type="submit" data-busy-label="Sending…">Email me a reset link</button>
+          </form>
+
+          <div class="auth-links">
+            <a href="<%= isClient ? '/portal/login' : '/login' %>">Back to sign in</a>
+            <a href="/#contact">Need help?</a>
+          </div>
+        <% } %>
+      </div>
+    </main>
+  </div>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>

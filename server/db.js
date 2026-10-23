@@ -195,15 +195,79 @@ CREATE TABLE IF NOT EXISTS audit_log (
   UNIQUE (tenant_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  requested_ip TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS emails (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  to_email TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  body_text TEXT NOT NULL,
+  link TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  provider TEXT,
+  error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_attempt_at TEXT,
+  sent_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  tradeline_id INTEGER REFERENCES tradelines(id) ON DELETE SET NULL,
+  dispute_id INTEGER REFERENCES disputes(id) ON DELETE SET NULL,
+  strategy TEXT NOT NULL,
+  tone TEXT NOT NULL DEFAULT 'Professional',
+  confidence INTEGER NOT NULL DEFAULT 70,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  citations TEXT NOT NULL DEFAULT '[]',
+  signals TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'Draft',
+  created_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_disputes_tenant ON disputes (tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents (tenant_id, client_id);
 CREATE INDEX IF NOT EXISTS idx_messages_client ON messages (client_id);
 CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id, seq);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions (expires_at);
+CREATE INDEX IF NOT EXISTS idx_resets_token ON password_resets (token_hash);
+CREATE INDEX IF NOT EXISTS idx_emails_tenant ON emails (tenant_id, id);
+CREATE INDEX IF NOT EXISTS idx_drafts_tenant ON drafts (tenant_id, id);
 `;
 
 db.exec(schema);
+
+/** Additive migrations for databases created before a column existed. */
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+ensureColumn("users", "must_change_password", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("disputes", "letter_body", "TEXT");
+try {
+  db.exec("PRAGMA busy_timeout = 5000;");
+} catch { /* older SQLite builds */ }
 
 export function getTenantById(id) {
   return db.prepare("SELECT * FROM tenants WHERE id = ?").get(Number(id));
@@ -271,6 +335,12 @@ export function nextDocRef(tenantId) {
     .get(tenantId);
   const n = Number(row?.n) || 1000;
   return `DOC-${n + 1}`;
+}
+
+export function emailRows(tenantId, limit = 100) {
+  return db
+    .prepare("SELECT * FROM emails WHERE tenant_id = ? ORDER BY id DESC LIMIT ?")
+    .all(tenantId, limit);
 }
 
 export function tenantStats(tenantId) {

@@ -6,6 +6,7 @@
  *
  * Never run --reset against a production volume: it destroys client records.
  */
+import "../server/env.js";
 import fs from "node:fs";
 import path from "node:path";
 

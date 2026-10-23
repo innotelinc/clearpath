@@ -1,0 +1,188 @@
+<%- include("partials/app-head", { title }) %>
+
+<%
+  const selected = form && form.tradeline_id ? String(form.tradeline_id) : "";
+  const draftSignals = draft ? draft.signals : [];
+  const confidenceTone = draft ? (draft.confidence >= 85 ? "teal" : draft.confidence >= 70 ? "blue" : "amber") : "blue";
+%>
+
+<div class="page-head">
+  <div>
+    <h1>Drafting studio</h1>
+    <p>Letters assembled from the case file — every sentence traces back to a record, and nothing is mailed until you approve it.</p>
+  </div>
+  <div class="page-actions">
+    <span class="chip mono"><%= strategies.length %> strategies</span>
+    <a class="btn btn-ghost" href="/app/mailroom">Mailroom</a>
+  </div>
+</div>
+
+<div class="studio-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>New draft</h2><p>Pick the item, then the legal basis</p></div>
+      </div>
+      <form class="card-body stack" method="post" action="/app/studio/generate">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+
+        <div class="field">
+          <label for="s-tradeline">Tradeline</label>
+          <select class="select" id="s-tradeline" name="tradeline_id" required>
+            <option value="">Choose an item from a client file…</option>
+            <% tradelines.forEach((row) => { %>
+              <option value="<%= row.id %>" <%= selected === String(row.id) ? "selected" : "" %>>
+                <%= row.client_name %> — <%= row.creditor %> ••<%= row.mask %> · <%= bureau[row.bureau].short %> · <%= row.type %>
+              </option>
+            <% }) %>
+          </select>
+          <% if (!tradelines.length) { %>
+            <span class="hint">No tradelines yet — add one from a client's file first.</span>
+          <% } %>
+        </div>
+
+        <div class="field">
+          <label for="s-strategy">Legal basis</label>
+          <select class="select" id="s-strategy" name="strategy">
+            <% strategies.forEach((plan) => { %>
+              <option value="<%= plan.id %>" <%= form.strategy === plan.id ? "selected" : "" %>><%= plan.label %></option>
+            <% }) %>
+          </select>
+          <span class="hint">Sets the authority cited and the remedy requested.</span>
+        </div>
+
+        <div class="field">
+          <label for="s-tone">Voice</label>
+          <select class="select" id="s-tone" name="tone">
+            <% Object.entries(tones).forEach(([key, value]) => { %>
+              <option value="<%= key %>" <%= form.tone === key ? "selected" : "" %>><%= value.label %></option>
+            <% }) %>
+          </select>
+        </div>
+
+        <div class="stack" style="gap:10px;padding-top:14px;border-top:1px solid var(--line)">
+          <label class="check-row">
+            <input type="checkbox" name="evidence" <%= form.evidence === false ? "" : "checked" %>>
+            <span>Reference the evidence on file</span>
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="citations" <%= form.citations === false ? "" : "checked" %>>
+            <span>Cite the statute in the body</span>
+          </label>
+        </div>
+
+        <button class="btn btn-primary" type="submit" data-busy-label="Drafting…">
+          <svg><use href="#i-spark"/></svg>Generate draft
+        </button>
+      </form>
+      <div class="card-body" style="border-top:1px solid var(--line)">
+        <p class="tiny muted">
+          Deterministic drafter: no model call, no per-letter cost, and the same file always produces the same letter.
+          Confidence reflects evidence strength, not a prediction of the outcome.
+        </p>
+      </div>
+    </section>
+
+    <% if (drafts.length) { %>
+      <section class="card">
+        <div class="card-head">
+          <div><h2>Recent drafts</h2><p>Saved in this workspace</p></div>
+        </div>
+        <div class="list-rows">
+          <% drafts.forEach((row) => { %>
+            <a class="list-row" href="/app/studio/<%= row.id %>" style="color:inherit">
+              <span class="badge <%= row.status === "Approved" ? "teal" : "gray" %> no-dot"><%= row.status %></span>
+              <div class="grow">
+                <div class="title truncate"><%= row.client_name %> · <%= row.creditor || "item removed" %><%= row.mask ? ` ••${row.mask}` : "" %></div>
+                <div class="meta"><%= row.confidence %>% · <%= fmtDate(row.created_at) %> · <%= row.created_by %></div>
+              </div>
+              <svg style="width:16px;height:16px;color:var(--ink-4)"><use href="#i-arrow"/></svg>
+            </a>
+          <% }) %>
+        </div>
+      </section>
+    <% } %>
+  </div>
+
+  <div class="stack">
+    <% if (draft) { %>
+      <section class="card">
+        <div class="card-head">
+          <div>
+            <h2 style="font-size:16px"><%= draft.subject %></h2>
+            <p><%= draft.client_name %> · <%= draft.strategy %> · <%= draft.tone %></p>
+          </div>
+          <span class="badge <%= draft.status === "Approved" ? "teal" : "violet" %> no-dot"><%= draft.status %></span>
+        </div>
+
+        <div class="card-body stack">
+          <div class="confidence">
+            <span class="badge <%= confidenceTone %> no-dot"><%= draft.confidence %>% confidence</span>
+            <span class="bar"><span style="width:<%= draft.confidence %>%"></span></span>
+          </div>
+
+          <% if (draftSignals.length) { %>
+            <div>
+              <h3 class="tiny" style="text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);margin-bottom:8px">What the file supports</h3>
+              <ul class="signal-list">
+                <% draftSignals.forEach((signal) => { %>
+                  <li><svg style="width:13px;height:13px;flex:none;color:var(--teal)"><use href="#i-check"/></svg><span><%= signal %></span></li>
+                <% }) %>
+              </ul>
+            </div>
+          <% } %>
+
+          <form method="post" action="/app/studio/<%= draft.id %>" class="stack">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <div class="field">
+              <label for="s-body">Letter body</label>
+              <textarea class="textarea draft-body" id="s-body" name="body" rows="22" spellcheck="true"><%= draft.body %></textarea>
+              <span class="hint">Edit anything before approving. Approved text is what the PDF and mailroom use.</span>
+            </div>
+            <div class="form-actions">
+              <% if (draft.status === "Approved") { %>
+                <a class="btn btn-primary" href="/app/disputes/<%= draft.dispute_id %>">Open the dispute</a>
+              <% } else { %>
+                <button class="btn" type="submit" name="action" value="save">Save draft</button>
+                <button class="btn btn-primary" type="submit" name="action" value="approve" data-busy-label="Approving…">Approve &amp; create dispute</button>
+              <% } %>
+            </div>
+          </form>
+
+          <div>
+            <h3 class="tiny" style="text-transform:uppercase;letter-spacing:.08em;color:var(--ink-4);margin-bottom:8px">Authority cited</h3>
+            <div class="row" style="flex-wrap:wrap;gap:6px">
+              <% draft.citations.forEach((cite) => { %><span class="chip mono"><%= cite %></span><% }) %>
+            </div>
+          </div>
+
+          <% if (draft.status !== "Approved") { %>
+            <form method="post" action="/app/studio/<%= draft.id %>/discard" data-confirm="Discard this draft? The dispute is not created and the letter is lost.">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <button class="btn btn-ghost btn-sm" type="submit"><svg><use href="#i-x"/></svg>Discard draft</button>
+            </form>
+          <% } %>
+        </div>
+      </section>
+    <% } else { %>
+      <section class="card card-pad">
+        <span class="badge violet no-dot"><svg><use href="#i-spark"/></svg>Drafting studio</span>
+        <h2 style="font-size:19px;margin:14px 0 8px">Evidence in, letter out.</h2>
+        <p class="muted small">
+          Choose a tradeline and the studio assembles a dispute letter from the fields on that item: the furnisher,
+          the reported balance, the payment history and the documents already in the vault.
+        </p>
+        <ol class="draft-steps">
+          <li><strong>Read the file.</strong> The draft lists what the record supports and what is still thin.</li>
+          <li><strong>Pick the basis.</strong> §611 reinvestigation, a direct furnisher dispute, an obsolescence claim or a Regulation V direct dispute.</li>
+          <li><strong>Approve.</strong> It becomes a dispute with its own reference, joins a mailroom package, and the letter PDF uses your edited text.</li>
+        </ol>
+        <p class="tiny muted">
+          Nothing here is sent to a credit bureau automatically — approving creates the case, and mailing stays a deliberate step in the mailroom.
+        </p>
+      </section>
+    <% } %>
+  </div>
+</div>
+
+<%- include("partials/app-foot") %>

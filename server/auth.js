@@ -86,7 +86,8 @@ export function attachSession(req, res, next) {
         email: row.email,
         name: row.name,
         role: row.role,
-        client_id: row.client_id
+        client_id: row.client_id,
+        must_change_password: Number(row.must_change_password) === 1
       };
       req.tenant = getTenantById(row.tenant_id);
       res.locals.user = req.user;
@@ -126,6 +127,11 @@ export function requireUser(roles = []) {
         message: "Your account does not have access to this area."
       });
     }
+    // A temp password from an invitation has to be replaced before the
+    // workspace or portal is usable.
+    if (req.user.must_change_password && req.originalUrl.split("?")[0] !== "/change-password") {
+      return res.redirect(303, `/change-password?next=${encodeURIComponent(req.originalUrl)}`);
+    }
     next();
   };
 }
@@ -164,20 +170,25 @@ export function checkCsrf(req, res, next) {
 
 const attempts = new Map();
 
-export function throttleLogin(key) {
+/** In-memory fixed-window limiter. Returns true when the caller is over budget. */
+export function throttle(key, { max = 10, windowMs = 15 * 60 * 1000, count = true } = {}) {
   const now = Date.now();
   const entry = attempts.get(key) || { count: 0, first: now };
-  if (now - entry.first > 15 * 60 * 1000) {
+  if (now - entry.first > windowMs) {
     entry.count = 0;
     entry.first = now;
   }
-  entry.count += 1;
+  if (count) entry.count += 1;
   attempts.set(key, entry);
-  return entry.count > 10;
+  return count ? entry.count > max : entry.count >= max;
+}
+
+export function throttleLogin(key) {
+  return throttle(`login:${key}`, { max: 10 });
 }
 
 export function clearLoginAttempts(key) {
-  attempts.delete(key);
+  attempts.delete(`login:${key}`);
 }
 
 export function authenticate(tenantId, email, password, expectedRoles = []) {

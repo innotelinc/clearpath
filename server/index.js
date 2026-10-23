@@ -1,9 +1,11 @@
+import "./env.js";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
 import { db, seedDemo, tenantForHost, tenantStats } from "./db.js";
+import { retryPending } from "./mail.js";
 import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass } from "./util.js";
 import publicRoutes from "./routes/public.js";
 import authRoutes from "./routes/auth.js";
@@ -139,9 +141,20 @@ const server = app.listen(port, () => {
 const cleanup = setInterval(() => {
   try {
     db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+    db.prepare("DELETE FROM password_resets WHERE expires_at < ?").run(new Date().toISOString());
   } catch { /* ignore */ }
 }, 60 * 60 * 1000);
 cleanup.unref?.();
+
+retryPending().catch(() => {});
+const mailRetry = setInterval(() => {
+  retryPending().catch(() => {});
+}, 5 * 60 * 1000);
+mailRetry.unref?.();
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Clearpath unhandled rejection:", reason);
+});
 
 const shutdown = (signal) => {
   console.log(`Clearpath: ${signal}, closing`);

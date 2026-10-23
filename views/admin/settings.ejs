@@ -12,14 +12,24 @@
 
 <% if (invited) { %>
   <div class="notice notice-ok" role="status">
-    <svg><use href="#i-lock"/></svg>
+    <svg><use href="#i-mail"/></svg>
     <div class="grow">
-      <strong><%= invited.name %> can now sign in.</strong> Send this temporary password over a channel you trust — it is shown once.
+      <strong><%= invited.name %> can now sign in.</strong> <%= invited.delivery %>
       <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
         <span class="chip mono"><%= invited.email %></span>
-        <span class="chip mono"><%= invited.password %></span>
-        <button class="btn btn-sm" type="button" data-copy="<%= invited.password %>">Copy password</button>
+        <% if (invited.password) { %>
+          <span class="chip mono"><%= invited.password %></span>
+          <button class="btn btn-sm" type="button" data-copy="<%= invited.password %>">Copy password</button>
+        <% } %>
       </div>
+      <p class="tiny muted" style="margin-top:8px">
+        <% if (invited.password) { %>
+          No mail provider is configured, so this temporary password is shown once — pass it on through a channel you trust.
+        <% } else { %>
+          They set their own password the first time they sign in.
+        <% } %>
+        Delivery status lives in the <a href="/app/mail-log">Mail log</a>.
+      </p>
     </div>
   </div>
 <% } %>
@@ -128,6 +138,15 @@
               <div class="meta"><%= member.email %></div>
             </div>
             <span class="badge <%= member.role === "owner" ? "violet" : member.role === "specialist" ? "blue" : "teal" %>"><%= member.role %></span>
+            <% if (user.role === "owner" && member.id !== user.id) { %>
+              <form method="post" action="/app/settings/team/<%= member.id %>/reset"
+                    data-confirm="Email a 60-minute reset link to <%= member.email %>?">
+                <input type="hidden" name="_csrf" value="<%= csrf %>">
+                <button class="btn btn-sm btn-ghost" type="submit" aria-label="Email reset link to <%= member.name %>">
+                  <svg><use href="#i-lock"/></svg>Reset
+                </button>
+              </form>
+            <% } %>
           </div>
         <% }) %>
       </div>
@@ -155,6 +174,30 @@
           <button class="btn btn-primary" type="submit" style="justify-self:start">Create account</button>
         </form>
       <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Email delivery</h2><p>Invitations and password resets</p></div></div>
+      <div class="card-body">
+        <dl class="def-list">
+          <div><dt>Transport</dt><dd class="mono"><%= mail.transport %></dd></div>
+          <div><dt>From</dt><dd><%= mail.from %></dd></div>
+          <div><dt>Waiting</dt><dd><%= queuedMail %> message<%= queuedMail === 1 ? "" : "s" %> in the outbox</dd></div>
+        </dl>
+        <% if (!mail.configured) { %>
+          <div class="notice notice-error" style="margin-top:14px;background:var(--amber-soft);border-color:#f0dcb8;color:#7a4a0d">
+            <svg><use href="#i-alert"/></svg>
+            <div>No provider configured. Emails are recorded in the <a href="/app/mail-log">Mail log</a> but not delivered.</div>
+          </div>
+          <p class="tiny muted" style="margin-top:10px">
+            Set <code>RESEND_API_KEY</code>, <code>POSTMARK_TOKEN</code> or <code>SENDGRID_API_KEY</code> (plus
+            <code>MAIL_FROM</code> on a verified domain) and restart the container.
+          </p>
+        <% } else { %>
+          <p class="tiny muted" style="margin-top:10px">Failed messages retry automatically four times before staying in the log for manual retry.</p>
+        <% } %>
+        <a class="btn btn-sm" href="/app/mail-log" style="margin-top:12px">Open mail log</a>
+      </div>
     </section>
 
     <section class="card">

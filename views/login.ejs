@@ -65,6 +65,20 @@
             : `Workspace access for ${siteName}. Clients sign in through the portal instead.` %>
         </p>
 
+        <% if (notice) { %>
+          <div class="notice notice-ok" style="margin-top:20px" role="status">
+            <svg><use href="#i-check"/></svg>
+            <div><%= notice %></div>
+          </div>
+        <% } %>
+
+        <% if (typeof query !== "undefined" && query && query.reset === "1") { %>
+          <div class="notice notice-ok" style="margin-top:20px" role="status">
+            <svg><use href="#i-check"/></svg>
+            <div>Your password was changed. Sign in with the new one.</div>
+          </div>
+        <% } %>
+
         <% if (error) { %>
           <div class="notice notice-error" style="margin-top:20px" role="alert">
             <svg><use href="#i-alert"/></svg>
@@ -92,6 +106,10 @@
           </div>
           <button class="btn btn-primary btn-block btn-lg" type="submit" data-busy-label="Signing in…">Sign in</button>
         </form>
+
+        <p class="auth-forgot">
+          <a href="/forgot?mode=<%= isClient ? 'client' : 'agency' %>">Forgot your password?</a>
+        </p>
 
         <div class="auth-links">
           <% if (isClient) { %>

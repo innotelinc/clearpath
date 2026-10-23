@@ -13,6 +13,12 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-0}
       SEED_DEMO: ${SEED_DEMO:-0}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-hello@denovocredit.com}
+      MAIL_FROM: ${MAIL_FROM:-Clearpath <no-reply@denovocredit.com>}
+      MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
+      MAIL_TRANSPORT: ${MAIL_TRANSPORT:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      POSTMARK_TOKEN: ${POSTMARK_TOKEN:-}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
     volumes:
       - clearpath-data:/data
     healthcheck:

@@ -1,0 +1,80 @@
+<%
+  const brand = tenant || hostTenant;
+  const isClient = mode === "client";
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("partials/icons") %>
+  <div class="auth-page">
+    <aside class="auth-aside">
+      <a class="brand" href="/" style="color:#fff">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block;color:#8698b3">Clearpath platform</span>
+        </span>
+      </a>
+      <div>
+        <h2>One link, one use.</h2>
+        <p>Choose a password only you know. Every other signed-in device on this account is signed out the moment you save it.</p>
+      </div>
+      <p class="foot">© <%= new Date().getFullYear() %> Denovo Credit · denovocredit.com</p>
+    </aside>
+
+    <main class="auth-main" id="main">
+      <div class="auth-card">
+        <a class="brand" href="/">
+          <span class="brand-mark accent"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+          <span class="brand-name">Clearpath</span>
+        </a>
+        <h1>Choose a new password</h1>
+        <p>
+          For <strong><%= reset.email %></strong> on the <%= siteName %> <%= isClient ? "client portal" : "workspace" %>.
+          This link expires <%= fmtDateTime(reset.expires_at) %>.
+        </p>
+
+        <% if (error) { %>
+          <div class="notice notice-error" style="margin-top:20px" role="alert">
+            <svg><use href="#i-alert"/></svg>
+            <div><%= error %></div>
+          </div>
+        <% } %>
+
+        <form method="post" action="/reset/<%= token %>" autocomplete="off">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <div class="field">
+            <label for="password">New password</label>
+            <input class="input" id="password" name="password" type="password" autocomplete="new-password"
+                   minlength="10" required autofocus>
+            <span class="hint">At least 10 characters, including a letter and a number.</span>
+          </div>
+          <div class="field">
+            <label for="confirm">Repeat the new password</label>
+            <input class="input" id="confirm" name="confirm" type="password" autocomplete="new-password"
+                   minlength="10" required>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" type="submit" data-busy-label="Saving…">Save password &amp; sign in</button>
+        </form>
+
+        <div class="auth-links">
+          <a href="<%= isClient ? '/portal/login' : '/login' %>">Back to sign in</a>
+          <a href="/forgot?mode=<%= isClient ? 'client' : 'agency' %>">Request a new link</a>
+        </div>
+      </div>
+    </main>
+  </div>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>

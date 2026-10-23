@@ -1,0 +1,88 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Mail log</h1>
+    <p>Every invitation and password-reset email this workspace has produced</p>
+  </div>
+  <div class="page-actions">
+    <span class="chip mono">transport · <%= mail.transport %></span>
+    <a class="btn btn-ghost" href="/app/settings">Settings</a>
+  </div>
+</div>
+
+<% if (!mail.configured) { %>
+  <div class="notice notice-ok" role="status" style="background:var(--amber-soft);border-color:#f0dcb8;color:#7a4a0d">
+    <svg><use href="#i-alert"/></svg>
+    <div class="grow">
+      <strong>No mail provider is configured.</strong>
+      Messages are recorded here instead of being delivered, so invitations and reset links stay reviewable.
+      Set <code>RESEND_API_KEY</code> (or <code>POSTMARK_TOKEN</code> / <code>SENDGRID_API_KEY</code>) and restart to send for real.
+    </div>
+  </div>
+<% } %>
+
+<section class="card">
+  <div class="card-head">
+    <div><h2>Outbox</h2><p><%= emails.length %> message<%= emails.length === 1 ? "" : "s" %> · newest first</p></div>
+    <span class="chip mono">from · <%= mail.from %></span>
+  </div>
+
+  <% if (!emails.length) { %>
+    <div class="card-body">
+      <p class="muted small">Nothing yet. Inviting a client or teammate, or someone using “Forgot your password?”, writes the first message here.</p>
+    </div>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Sent</th>
+            <th scope="col">To</th>
+            <th scope="col" class="hide-sm">Subject</th>
+            <th scope="col">Kind</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% emails.forEach((row) => { %>
+            <tr>
+              <td class="nowrap tiny"><%= fmtDateTime(row.sent_at || row.created_at) %></td>
+              <td><%= row.to_email %></td>
+              <td class="hide-sm"><div class="truncate" style="max-width:280px"><%= row.subject %></div>
+                <% if (row.error) { %><div class="tiny" style="color:var(--rose)"><%= row.error %></div><% } %>
+              </td>
+              <td><span class="chip mono"><%= row.kind %></span></td>
+              <td>
+                <span class="badge <%= row.status === "sent" ? "teal" : row.status === "failed" ? "rose" : "amber" %>"><%= row.status %></span>
+                <% if (row.attempts) { %><div class="tiny muted" style="margin-top:4px"><%= row.attempts %> attempt<%= row.attempts === 1 ? "" : "s" %></div><% } %>
+              </td>
+              <td style="text-align:right">
+                <% if (row.status !== "sent") { %>
+                  <form method="post" action="/app/mail-log/<%= row.id %>/retry">
+                    <input type="hidden" name="_csrf" value="<%= csrf %>">
+                    <button class="btn btn-sm" type="submit">Retry</button>
+                  </form>
+                <% } else { %>
+                  <span class="tiny muted"><%= row.provider || "—" %></span>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<div class="card card-pad" style="margin-top:16px">
+  <h2 style="font-size:15px;margin-bottom:8px">Reset links</h2>
+  <p class="small muted">
+    A reset link is valid for 60 minutes, works once, and signs out every other session on the account.
+    Requesting a new link invalidates the previous one. Links are never shown in this log — open the message body
+    from the database only when supporting a locked-out user.
+  </p>
+</div>
+
+<%- include("../partials/app-foot") %>

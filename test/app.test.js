@@ -5,11 +5,13 @@ import nodeHttp from "node:http";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const PORT = Number(process.env.TEST_PORT || 3917);
 const BASE = `http://127.0.0.1:${PORT}`;
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "clearpath-test-"));
 let child;
+let inspect;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -109,9 +111,13 @@ before(async () => {
   );
   child.stderr.on("data", (chunk) => process.stderr.write(chunk));
   await waitForServer();
+  inspect = new DatabaseSync(path.join(dataDir, "test.db"));
 });
 
 after(async () => {
+  try {
+    inspect?.close();
+  } catch { /* already closed */ }
   if (child) {
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
@@ -433,4 +439,207 @@ test("signing out ends the session", async () => {
   assert.equal(out.status, 303);
   const after = await http("/app", { jar });
   assert.equal(after.status, 302);
+});
+
+test("inviting a client emails a temporary password and forces it to be replaced", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const invite = await http("/app/clients/5/invite", {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf") }
+  });
+  assert.equal(invite.status, 200);
+  assert.match(invite.body, /Portal access created for Hannah Kim/);
+  assert.match(invite.body, /Mail log/);
+
+  const email = inspect.prepare("SELECT * FROM emails WHERE kind = 'credentials' ORDER BY id DESC LIMIT 1").get();
+  assert.equal(email.to_email, "hannah.kim@example.com");
+  assert.equal(email.status, "queued", "no transport configured, so the message waits in the outbox");
+  const temp = /Temporary password: (\S+)/.exec(email.body_text)?.[1];
+  assert.ok(temp, "the credential email should contain the temporary password");
+
+  const client = await signIn("hannah.kim@example.com", temp, "client");
+  assert.equal(client.res.status, 303);
+
+  const gate = await http("/portal", { jar: client.jar });
+  assert.equal(gate.status, 303);
+  assert.match(gate.location, /^\/change-password/);
+
+  const page = await http(gate.location, { jar: client.jar });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /Choose your password/);
+
+  const changed = await http("/change-password", {
+    method: "POST",
+    jar: client.jar,
+    form: {
+      _csrf: client.jar.get("cp_csrf"),
+      after: "/portal",
+      next: "HannahPass!2027",
+      confirm: "HannahPass!2027"
+    }
+  });
+  assert.equal(changed.status, 303);
+  const portal = await http("/portal", { jar: client.jar });
+  assert.equal(portal.status, 200);
+  assert.match(portal.body, /Hannah Kim/);
+
+  const row = inspect.prepare("SELECT must_change_password FROM users WHERE email = ?").get("hannah.kim@example.com");
+  assert.equal(Number(row.must_change_password), 0);
+});
+
+test("a reset link works once, rotates the password and ends other sessions", async () => {
+  const first = await signIn("amara@example.com", "Client!2026", "client");
+  const second = await signIn("amara@example.com", "Client!2026", "client");
+  assert.equal(first.res.status, 303);
+
+  const requester = new Map();
+  const page = await http("/forgot?mode=client", { jar: requester });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /Reset your password/);
+  const sent = await http("/forgot", {
+    method: "POST",
+    jar: requester,
+    form: { _csrf: requester.get("cp_csrf"), mode: "client", email: "amara@example.com" }
+  });
+  assert.equal(sent.status, 303);
+  assert.match(sent.location, /sent=1/);
+
+  const email = inspect.prepare("SELECT * FROM emails WHERE kind = 'password-reset' ORDER BY id DESC LIMIT 1").get();
+  assert.ok(email.link, "the reset email should carry a link");
+  const pathname = new URL(email.link).pathname;
+
+  const visitor = new Map();
+  const form = await http(pathname, { jar: visitor });
+  assert.equal(form.status, 200);
+  assert.match(form.body, /Choose a new password/);
+
+  const saved = await http(pathname, {
+    method: "POST",
+    jar: visitor,
+    form: { _csrf: visitor.get("cp_csrf"), password: "ClientReset!2027", confirm: "ClientReset!2027" }
+  });
+  assert.equal(saved.status, 303);
+  assert.match(saved.location, /^\/portal\/login/);
+
+  // Both sessions that existed before the reset are gone.
+  assert.equal((await http("/portal", { jar: first.jar })).status, 302);
+  assert.equal((await http("/portal", { jar: second.jar })).status, 302);
+
+  const reuse = await http(pathname, { jar: new Map() });
+  assert.equal(reuse.status, 400, "a used link must not work twice");
+
+  const again = await signIn("amara@example.com", "ClientReset!2027", "client");
+  assert.equal(again.res.status, 303);
+  assert.equal((await http("/portal", { jar: again.jar })).status, 200);
+});
+
+test("the drafting studio turns an approved draft into a dispute with its edited text", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const generated = await http("/app/studio/generate", {
+    method: "POST",
+    jar,
+    form: {
+      _csrf: jar.get("cp_csrf"),
+      tradeline_id: "1",
+      strategy: "fcra-611",
+      tone: "Firm",
+      evidence: "on",
+      citations: "on"
+    }
+  });
+  assert.equal(generated.status, 303);
+  assert.match(generated.location, /^\/app\/studio\/\d+$/);
+
+  const page = await http(generated.location, { jar });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /What the file supports/);
+  assert.match(page.body, /15 U\.S\.C\./);
+  assert.match(page.body, /Jefferson Capital/);
+
+  const draftId = generated.location.split("/").pop();
+  const approved = await http(`/app/studio/${draftId}`, {
+    method: "POST",
+    jar,
+    form: {
+      _csrf: jar.get("cp_csrf"),
+      action: "approve",
+      body: "First approved paragraph.\n\nSecond approved paragraph."
+    }
+  });
+  assert.equal(approved.status, 303);
+  const disputePath = approved.location.split("?")[0];
+  assert.match(disputePath, /^\/app\/disputes\/\d+$/);
+
+  const dispute = await http(disputePath, { jar });
+  assert.equal(dispute.status, 200);
+  assert.match(dispute.body, /First approved paragraph/);
+
+  const pdf = await http(`${disputePath}/letter.pdf`, { jar, binary: true });
+  assert.equal(pdf.body.subarray(0, 5).toString("latin1"), "%PDF-");
+  assert.ok(pdf.body.length > 1500);
+
+  const saved = inspect
+    .prepare("SELECT letter_body FROM disputes WHERE id = ?")
+    .get(Number(disputePath.split("/").pop()));
+  assert.match(saved.letter_body, /Second approved paragraph/);
+});
+
+test("the mail log lists the outbox and refuses to send without a transport", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const page = await http("/app/mail-log", { jar });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /No mail provider is configured/);
+  assert.match(page.body, /queued/);
+
+  const row = inspect.prepare("SELECT id FROM emails ORDER BY id DESC LIMIT 1").get();
+  const retry = await http(`/app/mail-log/${row.id}/retry`, {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf") }
+  });
+  assert.equal(retry.status, 303);
+  assert.match(retry.location, /error=/);
+
+  const specialist = await signIn("marcus@denovocredit.com", "Specialist!2026");
+  assert.equal((await http("/app/mail-log", { jar: specialist.jar })).status, 403);
+});
+
+test("password reset requests are rate limited per address", async () => {
+  const count = () =>
+    inspect.prepare("SELECT COUNT(*) AS n FROM emails WHERE kind = 'password-reset' AND to_email = ?")
+      .get("priya@example.com").n;
+  const before = count();
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const jar = new Map();
+    await http("/forgot", { jar });
+    await http("/forgot", {
+      method: "POST",
+      jar,
+      form: { _csrf: jar.get("cp_csrf"), mode: "client", email: "priya@example.com" }
+    });
+  }
+  assert.equal(count(), before + 5, "the sixth request in the window must be dropped");
+});
+
+test("changing a password keeps the current session and ends the others", async () => {
+  const mine = await signIn("marcus@denovocredit.com", "Specialist!2026");
+  const other = await signIn("marcus@denovocredit.com", "Specialist!2026");
+
+  const changed = await http("/change-password", {
+    method: "POST",
+    jar: mine.jar,
+    form: {
+      _csrf: mine.jar.get("cp_csrf"),
+      current: "Specialist!2026",
+      next: "Specialist!2027",
+      confirm: "Specialist!2027"
+    }
+  });
+  assert.equal(changed.status, 303);
+  assert.equal((await http("/app", { jar: other.jar })).status, 302);
+  assert.equal((await http("/app", { jar: mine.jar })).status, 200);
+
+  const relogin = await signIn("marcus@denovocredit.com", "Specialist!2027");
+  assert.equal(relogin.res.status, 303);
 });

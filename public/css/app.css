@@ -1187,3 +1187,23 @@ dialog.modal::backdrop { background: rgba(11, 20, 36, 0.5); backdrop-filter: blu
   .card { border: 1px solid #ccc; box-shadow: none; break-inside: avoid; }
   a[href]::after { content: ""; }
 }
+
+/* ---------------- drafting studio & account flows ---------------- */
+.studio-grid { display: grid; grid-template-columns: minmax(300px, 370px) minmax(0, 1fr); gap: 18px; align-items: start; }
+.check-row { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-2); }
+.check-row input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.confidence { display: flex; align-items: center; gap: 10px; }
+.confidence .bar { flex: 1; height: 6px; border-radius: 999px; background: var(--paper-3); overflow: hidden; }
+.confidence .bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.signal-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.signal-list li { display: flex; gap: 8px; align-items: flex-start; font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+.draft-body { font-family: var(--mono); font-size: 12.5px; line-height: 1.75; min-height: 380px; }
+.draft-steps { margin: 16px 0 14px; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--ink-3); line-height: 1.55; }
+.draft-steps strong { color: var(--ink); }
+.auth-forgot { margin-top: 14px; font-size: 13px; text-align: right; }
+.auth-forgot a { color: var(--ink-3); text-decoration: underline; text-underline-offset: 2px; }
+.auth-forgot a:hover { color: var(--accent-ink); }
+
+@media (max-width: 980px) {
+  .studio-grid { grid-template-columns: 1fr; }
+}

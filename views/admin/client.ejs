@@ -30,7 +30,7 @@
     <a class="btn" href="/app/clients">All clients</a>
     <% if (!portalUser && user.role === "owner") { %>
       <form method="post" action="/app/clients/<%= client.id %>/invite"
-            data-confirm="Create a portal account for <%= client.name %>? A temporary password will be shown once.">
+            data-confirm="Create a portal account for <%= client.name %>? We will email them a sign-in and a temporary password.">
         <input type="hidden" name="_csrf" value="<%= csrf %>">
         <button class="btn" type="submit">Invite to portal</button>
       </form>
@@ -41,14 +41,24 @@
 
 <% if (invite) { %>
   <div class="notice notice-ok" role="status">
-    <svg><use href="#i-lock"/></svg>
+    <svg><use href="#i-mail"/></svg>
     <div class="grow">
-      <strong>Portal access created.</strong> Share this temporary password with <%= client.name %> — it is shown once and cannot be retrieved later.
+      <strong>Portal access created for <%= client.name %>.</strong> <%= invite.delivery %>
       <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
         <span class="chip mono"><%= invite.email %></span>
-        <span class="chip mono" id="invite-pass"><%= invite.password %></span>
-        <button class="btn btn-sm" type="button" data-copy="<%= invite.password %>">Copy password</button>
+        <% if (invite.password) { %>
+          <span class="chip mono" id="invite-pass"><%= invite.password %></span>
+          <button class="btn btn-sm" type="button" data-copy="<%= invite.password %>">Copy password</button>
+        <% } %>
       </div>
+      <p class="tiny muted" style="margin-top:8px">
+        <% if (invite.password) { %>
+          No mail provider is configured, so this temporary password is shown once — pass it on through a channel you trust.
+        <% } else { %>
+          They choose their own password the first time they sign in.
+        <% } %>
+        Delivery status lives in the <a href="/app/mail-log">Mail log</a>.
+      </p>
     </div>
   </div>
 <% } %>
@@ -299,8 +309,20 @@
         <h3 style="font-size:14px;margin-bottom:10px">Portal contact</h3>
         <% if (portalUser) { %>
           <p class="small"><%= portalUser.email %></p>
-          <p class="tiny muted" style="margin-top:4px">Role: <%= portalUser.role %> · account active</p>
-          <p class="tiny muted" style="margin-top:12px">If they lose access, reset the password from the database or create a new invitation after removing the old account.</p>
+          <p class="tiny muted" style="margin-top:4px">
+            Role: <%= portalUser.role %> ·
+            <%= portalUser.must_change_password ? "temporary password not yet replaced" : "account active" %>
+          </p>
+          <% if (user.role === "owner") { %>
+            <form method="post" action="/app/clients/<%= client.id %>/portal-reset" style="margin-top:12px"
+                  data-confirm="Email a fresh 60-minute reset link to <%= portalUser.email %>?">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <button class="btn btn-sm" type="submit"><svg><use href="#i-lock"/></svg>Email a reset link</button>
+            </form>
+            <p class="tiny muted" style="margin-top:8px">Use this when they are locked out. Their current password keeps working until they use the link.</p>
+          <% } else { %>
+            <p class="tiny muted" style="margin-top:10px">An owner can email a reset link if they lose access.</p>
+          <% } %>
         <% } else { %>
           <p class="small muted">No portal account yet.</p>
           <% if (user.role === "owner") { %>

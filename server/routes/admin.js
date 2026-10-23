@@ -1,8 +1,11 @@
 import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR, db, audit, auditEntries, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
-import { hashPassword, temporaryPassword, verifyPassword, strongEnough } from "../security.js";
+import { DATA_DIR, db, audit, auditEntries, emailRows, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
+import { hashPassword, verifyPassword, strongEnough } from "../security.js";
+import { createAccount, emailDeliveryNote, sendCredentials, sendResetLink } from "../accounts.js";
+import { deliver, mailConfigured, mailStatus } from "../mail.js";
+import { STRATEGIES, TONES, generateDraft, getDraft, listDrafts, parseList } from "../studio.js";
 import { letterPdf, letterText, labelsPdf, queuePdf } from "../pdf.js";
 import {
   allRequests, clientDisputes, clientDocuments, clientMessages, clientPackages, clientRequests,
@@ -74,11 +77,11 @@ router.post("/clients", (req, res) => {
   back(res, `/app/clients/${id}`, { notice: `${name} added. Invite them to the portal when you are ready.` });
 });
 
-router.get("/clients/:id", (req, res) => {
+function renderClient(req, res, client, extra = {}) {
   const t = tenantId(req);
-  const client = getClient(t, req.params.id);
-  if (!client) return fail(res, 404, "Client not found", "That client is not in this workspace.");
-  const invites = db.prepare("SELECT id, email, role FROM users WHERE tenant_id = ? AND client_id = ?").all(t, client.id);
+  const portalUser = db
+    .prepare("SELECT id, email, role, must_change_password FROM users WHERE tenant_id = ? AND client_id = ? ORDER BY id LIMIT 1")
+    .get(t, client.id) || null;
   res.render("admin/client", {
     title: client.name,
     page: "clients",
@@ -89,9 +92,17 @@ router.get("/clients/:id", (req, res) => {
     messages: clientMessages(t, client.id),
     tradelines: clientTradelines(t, client.id),
     packages: clientPackages(t, client.id),
-    portalUser: invites[0] || null,
-    invite: null
+    portalUser,
+    invite: null,
+    ...extra
   });
+}
+
+router.get("/clients/:id", (req, res) => {
+  const t = tenantId(req);
+  const client = getClient(t, req.params.id);
+  if (!client) return fail(res, 404, "Client not found", "That client is not in this workspace.");
+  renderClient(req, res, client);
 });
 
 router.post("/clients/:id/notes", (req, res) => {
@@ -128,32 +139,52 @@ router.post("/clients/:id/tradelines", (req, res) => {
   back(res, `/app/clients/${client.id}`, { notice: "Tradeline added." });
 });
 
-router.post("/clients/:id/invite", (req, res) => {
+router.post("/clients/:id/invite", async (req, res) => {
   if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can invite portal users.");
   const t = tenantId(req);
   const client = getClient(t, req.params.id);
   if (!client) return fail(res, 404, "Client not found", "That client is not in this workspace.");
   const existing = db.prepare("SELECT id FROM users WHERE tenant_id = ? AND client_id = ?").get(t, client.id);
-  if (existing) return back(res, `/app/clients/${client.id}`, { error: "This client already has a portal account." });
-  const password = temporaryPassword();
-  const { hash, salt } = hashPassword(password);
-  db.prepare("INSERT INTO users (tenant_id, email, name, role, client_id, password_hash, password_salt) VALUES (?, ?, ?, 'client', ?, ?, ?)")
-    .run(t, client.email.toLowerCase(), client.name, client.id, hash, salt);
+  if (existing) return back(res, `/app/clients/${client.id}`, { error: "This client already has a portal account. Email them a reset link instead." });
+
+  const { user, password } = createAccount({
+    tenantId: t,
+    name: client.name,
+    email: client.email,
+    role: "client",
+    clientId: client.id
+  });
   db.prepare("UPDATE clients SET portal_status = 'Active' WHERE id = ?").run(client.id);
   audit(t, actor(req), "Invited client to the portal:", client.name);
-  res.status(200).render("admin/client", {
-    title: client.name,
-    page: "clients",
-    clientRecord: client,
-    disputes: clientDisputes(t, client.id),
-    documents: clientDocuments(t, client.id),
-    requests: clientRequests(t, client.id),
-    messages: clientMessages(t, client.id),
-    tradelines: clientTradelines(t, client.id),
-    packages: clientPackages(t, client.id),
-    portalUser: { email: client.email },
-    invite: { email: client.email, password }
+
+  let delivery = "The invitation email could not be queued.";
+  try {
+    const row = await sendCredentials({ tenant: req.tenant, req, user, password, role: "client" });
+    delivery = emailDeliveryNote(row);
+    if (row.status !== "failed") audit(t, actor(req), "Emailed portal invitation to", client.email);
+  } catch (err) {
+    delivery = `The invitation email could not be queued: ${err.message}`;
+  }
+
+  renderClient(req, res, client, {
+    invite: { email: client.email, password: mailConfigured ? null : password, delivery }
   });
+});
+
+router.post("/clients/:id/portal-reset", async (req, res) => {
+  if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can reset a portal password.");
+  const t = tenantId(req);
+  const client = getClient(t, req.params.id);
+  if (!client) return fail(res, 404, "Client not found", "That client is not in this workspace.");
+  const user = db.prepare("SELECT * FROM users WHERE tenant_id = ? AND client_id = ?").get(t, client.id);
+  if (!user) return back(res, `/app/clients/${client.id}`, { error: "This client has no portal account yet." });
+
+  try {
+    const { row } = await sendResetLink({ tenant: req.tenant, req, user, ip: req.ip });
+    back(res, `/app/clients/${client.id}`, { notice: emailDeliveryNote(row) });
+  } catch (err) {
+    back(res, `/app/clients/${client.id}`, { error: `The reset email could not be queued: ${err.message}` });
+  }
 });
 
 router.post("/clients/:id/request", (req, res) => {
@@ -517,16 +548,210 @@ router.get("/audit.csv", (req, res) => {
   res.send(rows.join("\n"));
 });
 
+/* ---------------- drafting studio ---------------- */
+
+const strategyList = () =>
+  Object.entries(STRATEGIES).map(([id, plan]) => ({
+    id,
+    label: plan.label,
+    short: plan.short,
+    authority: plan.authority
+  }));
+
+function studioLocals(req, extra = {}) {
+  const t = tenantId(req);
+  const tradelines = db
+    .prepare(
+      `SELECT tr.*, c.name AS client_name, c.ref AS client_ref
+       FROM tradelines tr JOIN clients c ON c.id = tr.client_id
+       WHERE tr.tenant_id = ? ORDER BY c.name, tr.bureau, tr.creditor`
+    )
+    .all(t);
+  return {
+    title: "Drafting studio",
+    page: "studio",
+    tradelines,
+    drafts: listDrafts(t, 10),
+    draft: null,
+    strategies: strategyList(),
+    tones: TONES,
+    form: { tradeline_id: "", strategy: "fcra-611", tone: "Professional", evidence: true, citations: true },
+    ...extra
+  };
+}
+
+router.get("/studio", (req, res) => {
+  res.render("studio", studioLocals(req));
+});
+
+router.get("/studio/:id", (req, res) => {
+  const t = tenantId(req);
+  const draft = getDraft(t, req.params.id);
+  if (!draft) return fail(res, 404, "Draft not found", "That draft is not in this workspace.");
+  res.render(
+    "studio",
+    studioLocals(req, {
+      title: `Draft ${draft.id}`,
+      draft: {
+        ...draft,
+        citations: parseList(draft.citations),
+        signals: parseList(draft.signals)
+      },
+      form: { tradeline_id: draft.tradeline_id || "", strategy: draft.strategy, tone: draft.tone }
+    })
+  );
+});
+
+router.post("/studio/generate", (req, res) => {
+  const t = tenantId(req);
+  const tradeline = db
+    .prepare(
+      `SELECT tr.*, c.name AS client_name FROM tradelines tr
+       JOIN clients c ON c.id = tr.client_id
+       WHERE tr.id = ? AND tr.tenant_id = ?`
+    )
+    .get(Number(req.body.tradeline_id), t);
+  if (!tradeline) return back(res, "/app/studio", { error: "Choose a tradeline to draft against." });
+  const client = getClient(t, tradeline.client_id);
+  if (!client) return back(res, "/app/studio", { error: "That client is not in this workspace." });
+
+  const result = generateDraft({
+    tenant: req.tenant,
+    client,
+    tradeline,
+    strategy: String(req.body.strategy || "fcra-611"),
+    tone: String(req.body.tone || "Professional"),
+    includeEvidence: req.body.evidence === "on",
+    includeCitations: req.body.citations === "on"
+  });
+
+  const draftId = Number(
+    db.prepare(
+      `INSERT INTO drafts (tenant_id, client_id, tradeline_id, strategy, tone, confidence, subject, body, citations, signals, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Draft', ?)`
+    ).run(
+      t,
+      client.id,
+      tradeline.id,
+      result.strategy,
+      result.tone,
+      result.confidence,
+      result.subject,
+      result.body,
+      JSON.stringify(result.citations),
+      JSON.stringify(result.signals),
+      actor(req)
+    ).lastInsertRowid
+  );
+
+  audit(t, actor(req), "Drafted a dispute letter for", `${client.name} · ${tradeline.creditor} ••${tradeline.mask}`);
+  res.redirect(303, `/app/studio/${draftId}`);
+});
+
+router.post("/studio/:id", (req, res) => {
+  const t = tenantId(req);
+  const draft = getDraft(t, req.params.id);
+  if (!draft) return fail(res, 404, "Draft not found", "That draft is not in this workspace.");
+
+  const body = String(req.body.body || "").trim().slice(0, 20000) || draft.body;
+  db.prepare("UPDATE drafts SET body = ? WHERE id = ? AND tenant_id = ?").run(body, draft.id, t);
+
+  if (req.body.action !== "approve") {
+    return back(res, `/app/studio/${draft.id}`, { notice: "Draft saved. Nothing is mailed until you approve it." });
+  }
+  if (draft.status === "Approved") {
+    return back(res, `/app/studio/${draft.id}`, { error: "This draft was already approved." });
+  }
+
+  const tradeline = db
+    .prepare("SELECT * FROM tradelines WHERE id = ? AND tenant_id = ?")
+    .get(Number(draft.tradeline_id), t);
+  if (!tradeline) {
+    return back(res, `/app/studio/${draft.id}`, { error: "The tradeline behind this draft no longer exists. Regenerate it first." });
+  }
+
+  const prior = db
+    .prepare("SELECT MAX(round) AS round FROM disputes WHERE tenant_id = ? AND tradeline_id = ?")
+    .get(t, tradeline.id);
+  const round = Math.min(5, (Number(prior?.round) || 0) + 1);
+  const ref = nextRef(t, "disputes", "DSP");
+  const disputeId = Number(
+    db.prepare(
+      `INSERT INTO disputes (tenant_id, client_id, tradeline_id, ref, bureau, account, issue, round, status, confidence, letter_body)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Needs review', ?, ?)`
+    ).run(
+      t,
+      draft.client_id,
+      tradeline.id,
+      ref,
+      tradeline.bureau,
+      `${tradeline.creditor} ••${tradeline.mask}`,
+      tradeline.reason,
+      round,
+      draft.confidence,
+      body
+    ).lastInsertRowid
+  );
+  db.prepare("UPDATE drafts SET status = 'Approved', dispute_id = ? WHERE id = ? AND tenant_id = ?").run(disputeId, draft.id, t);
+  audit(t, actor(req), "Approved a studio draft for", `${draft.client_name} · ${ref}`);
+  back(res, `/app/disputes/${disputeId}`, { notice: `${ref} created from the approved draft.` });
+});
+
+router.post("/studio/:id/discard", (req, res) => {
+  const t = tenantId(req);
+  const draft = getDraft(t, req.params.id);
+  if (!draft) return fail(res, 404, "Draft not found", "That draft is not in this workspace.");
+  db.prepare("DELETE FROM drafts WHERE id = ? AND tenant_id = ?").run(draft.id, t);
+  audit(t, actor(req), "Discarded a studio draft for", draft.client_name);
+  back(res, "/app/studio", { notice: "Draft discarded. No dispute was created." });
+});
+
+/* ---------------- mail log ---------------- */
+
+router.get("/mail-log", (req, res) => {
+  if (req.user.role !== "owner") {
+    return fail(res, 403, "Owner only", "The mail log can contain account credentials, so only an owner can open it.");
+  }
+  res.render("admin/mail-log", {
+    title: "Mail log",
+    page: "mail-log",
+    emails: emailRows(tenantId(req), 100),
+    mail: mailStatus()
+  });
+});
+
+router.post("/mail-log/:id/retry", async (req, res) => {
+  if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can resend mail.");
+  const t = tenantId(req);
+  const row = db.prepare("SELECT * FROM emails WHERE id = ? AND tenant_id = ?").get(Number(req.params.id), t);
+  if (!row) return fail(res, 404, "Message not found", "That message is not in this workspace.");
+  const after = await deliver(row.id);
+  if (after.status === "sent") return back(res, "/app/mail-log", { notice: `Message to ${after.to_email} accepted by ${after.provider}.` });
+  if (!mailConfigured) {
+    return back(res, "/app/mail-log", {
+      error: "No mail provider is configured, so the message stays in this log. Set RESEND_API_KEY (or Postmark/SendGrid) and restart."
+    });
+  }
+  back(res, "/app/mail-log", { error: `Still failing: ${after.error || "provider rejected the message"}` });
+});
+
 /* ---------------- settings ---------------- */
 
 router.get("/settings", (req, res) => {
   const t = tenantId(req);
-  const team = db.prepare("SELECT id, name, email, role, last_login_at FROM users WHERE tenant_id = ? ORDER BY role, name").all(t);
+  const team = db
+    .prepare("SELECT id, name, email, role, last_login_at, must_change_password FROM users WHERE tenant_id = ? ORDER BY role, name")
+    .all(t);
+  const queued = db
+    .prepare("SELECT COUNT(*) AS n FROM emails WHERE tenant_id = ? AND status IN ('queued','failed')")
+    .get(t).n;
   res.render("admin/settings", {
     title: "Settings",
     page: "settings",
     team,
     invited: null,
+    mail: mailStatus(),
+    queuedMail: queued,
     saved: req.query.notice || ""
   });
 });
@@ -558,7 +783,7 @@ router.post("/settings/branding", (req, res) => {
   back(res, "/app/settings", { notice: "Branding updated across the workspace, portal and PDFs." });
 });
 
-router.post("/settings/team", (req, res) => {
+router.post("/settings/team", async (req, res) => {
   const t = tenantId(req);
   if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can invite teammates.");
   const name = String(req.body.name || "").trim().slice(0, 80);
@@ -570,19 +795,46 @@ router.post("/settings/team", (req, res) => {
   if (db.prepare("SELECT id FROM users WHERE tenant_id = ? AND lower(email) = ?").get(t, email)) {
     return back(res, "/app/settings", { error: "That email already has an account here." });
   }
-  const password = temporaryPassword();
-  const { hash, salt } = hashPassword(password);
-  db.prepare("INSERT INTO users (tenant_id, email, name, role, password_hash, password_salt) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(t, email, name, role, hash, salt);
+  const { user, password } = createAccount({ tenantId: t, name, email, role });
   audit(t, actor(req), "Invited teammate", `${name} · ${role}`);
-  const team = db.prepare("SELECT id, name, email, role, last_login_at FROM users WHERE tenant_id = ? ORDER BY role, name").all(t);
+
+  let delivery = "The invitation email could not be queued.";
+  try {
+    const row = await sendCredentials({ tenant: req.tenant, req, user, password, role });
+    delivery = emailDeliveryNote(row);
+    if (row.status !== "failed") audit(t, actor(req), "Emailed workspace invitation to", email);
+  } catch (err) {
+    delivery = `The invitation email could not be queued: ${err.message}`;
+  }
+
+  const team = db
+    .prepare("SELECT id, name, email, role, last_login_at, must_change_password FROM users WHERE tenant_id = ? ORDER BY role, name")
+    .all(t);
   res.render("admin/settings", {
     title: "Settings",
     page: "settings",
     team,
-    invited: { name, email, role, password },
+    invited: { name, email, role, password: mailConfigured ? null : password, delivery },
+    mail: mailStatus(),
+    queuedMail: 0,
     saved: ""
   });
+});
+
+router.post("/settings/team/:id/reset", async (req, res) => {
+  if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can reset a teammate's password.");
+  const t = tenantId(req);
+  const user = db
+    .prepare("SELECT * FROM users WHERE id = ? AND tenant_id = ? AND role != 'client'")
+    .get(Number(req.params.id), t);
+  if (!user) return fail(res, 404, "Account not found", "That account is not in this workspace.");
+  if (user.id === req.user.id) return back(res, "/app/settings", { error: "Use the password form below to change your own password." });
+  try {
+    const { row } = await sendResetLink({ tenant: req.tenant, req, user, ip: req.ip });
+    back(res, "/app/settings", { notice: emailDeliveryNote(row) });
+  } catch (err) {
+    back(res, "/app/settings", { error: `The reset email could not be queued: ${err.message}` });
+  }
 });
 
 router.post("/settings/password", (req, res) => {
@@ -596,7 +848,8 @@ router.post("/settings/password", (req, res) => {
     return back(res, "/app/settings", { error: "Use at least 10 characters with letters and a number." });
   }
   const { hash, salt } = hashPassword(next);
-  db.prepare("UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?").run(hash, salt, req.user.id);
+  db.prepare("UPDATE users SET password_hash = ?, password_salt = ?, must_change_password = 0 WHERE id = ?").run(hash, salt, req.user.id);
+  db.prepare("DELETE FROM sessions WHERE user_id = ? AND id != ?").run(req.user.id, req.session?.id || "");
   audit(req.tenant.id, actor(req), "Changed their password", req.user.email);
   back(res, "/app/settings", { notice: "Password updated." });
 });

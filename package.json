@@ -12,7 +12,7 @@
     "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/db.js && node --check server/auth.js && node --check server/pdf.js"
+    "check": "node --check server/index.js && node --check server/db.js && node --check server/auth.js && node --check server/pdf.js && node --check server/env.js && node --check server/mail.js && node --check server/accounts.js && node --check server/studio.js"
   },
   "dependencies": {
     "ejs": "^3.1.10",
