@@ -218,6 +218,52 @@ export async function retrieveCheckoutSession(id) {
   });
 }
 
+/**
+ * Move an existing subscription onto another plan.
+ *
+ * Checkout would create a *second* subscription on the same customer and bill
+ * them twice, so a workspace that is already subscribed changes the item on the
+ * subscription it has. Stripe prorates the difference onto the next invoice.
+ */
+export async function changeSubscriptionPlan({ tenant, plan }) {
+  const chosen = planByKey(plan?.key || plan);
+  if (!chosen) throw new BillingError("Pick one of the published plans.");
+  if (!tenant?.stripe_subscription_id) {
+    throw new BillingError("This workspace has no subscription to change. Choose a plan instead.");
+  }
+
+  const current = await retrieveSubscription(tenant.stripe_subscription_id);
+  const item = current?.items?.data?.[0];
+  if (!item?.id) throw new BillingError("Stripe did not return a subscription item to change.");
+
+  // Subscription items need a real Price object; inline price_data is only
+  // accepted when the subscription is created.
+  const price = await request("/prices", {
+    method: "POST",
+    form: {
+      currency: "usd",
+      unit_amount: chosen.amount,
+      "recurring[interval]": "month",
+      "product_data[name]": `Clearpath ${chosen.name}`,
+      "metadata[plan]": chosen.key
+    }
+  });
+
+  const updated = await request(`/subscriptions/${encodeURIComponent(current.id)}`, {
+    method: "POST",
+    form: {
+      "items[0][id]": item.id,
+      "items[0][price]": price.id,
+      proration_behavior: "create_prorations",
+      "metadata[plan]": chosen.key,
+      "metadata[tenant_id]": String(tenant.id)
+    }
+  });
+
+  const applied = applySubscription(tenant.id, updated);
+  return { plan: chosen.key, status: applied?.status || updated?.status || "active", subscriptionId: current.id };
+}
+
 export async function createBillingPortalSession({ customerId, returnUrl }) {
   if (!customerId) {
     throw new BillingError("This workspace has no Stripe customer yet. Choose a plan first.");
@@ -233,6 +279,12 @@ export async function createBillingPortalSession({ customerId, returnUrl }) {
 export async function retrieveSubscription(id) {
   return request(`/subscriptions/${encodeURIComponent(String(id))}`);
 }
+
+/**
+ * Statuses where a subscription exists and should be changed in place rather
+ * than re-created. `canceled` is deliberately absent: that workspace resubscribes.
+ */
+export const CHANGEABLE_STATUSES = ["active", "trialing", "past_due", "unpaid", "incomplete", "paused"];
 
 /* ---------------- keeping tenants in step ---------------- */
 

@@ -148,6 +148,27 @@ function startMock() {
         return subscription ? send(200, subscription) : send(404, { error: { message: "no such subscription" } });
       }
 
+      if (req.method === "POST" && url.pathname === "/v1/prices") {
+        captures.push({ kind: "price", form });
+        return send(200, { id: `price_${form["metadata[plan]"]}`, object: "price", unit_amount: Number(form.unit_amount) });
+      }
+
+      if (req.method === "POST" && url.pathname.startsWith("/v1/subscriptions/")) {
+        const id = url.pathname.split("/").pop();
+        captures.push({ kind: "switch", form, subscriptionId: id });
+        const current = subscriptions.get(id);
+        const planKey = form["metadata[plan]"];
+        const amount = planKey === "starter" ? 14900 : planKey === "scale" ? 79900 : 39900;
+        const updated = {
+          ...current,
+          status: current?.status === "past_due" ? "past_due" : "active",
+          metadata: { ...current?.metadata, plan: planKey },
+          items: { data: [{ id: "si_1", price: { unit_amount: amount, recurring: { interval: "month" } } }] }
+        };
+        subscriptions.set(id, updated);
+        return send(200, updated);
+      }
+
       if (req.method === "POST" && url.pathname === "/v1/billing_portal/sessions") {
         captures.push({ kind: "portal", form });
         return send(200, { id: "bps_1", url: "https://billing.stripe.test/session/bps_1" });
@@ -201,7 +222,7 @@ before(async () => {
     customer: "cus_test_1",
     current_period_end: Math.floor(Date.now() / 1000) + 30 * 86400,
     metadata: { tenant_id: String(tenantId), plan: "growth" },
-    items: { data: [{ price: { unit_amount: 39900, recurring: { interval: "month" } } }] }
+    items: { data: [{ id: "si_1", price: { unit_amount: 39900, recurring: { interval: "month" } } }] }
   });
 });
 
@@ -279,6 +300,45 @@ test("the success redirect records the subscription on the workspace", async () 
   assert.equal(row.plan_status, "active");
   assert.equal(row.stripe_customer_id, "cus_test_1");
   assert.equal(row.stripe_subscription_id, "sub_test_1");
+});
+
+test("switching plans updates the subscription instead of opening a second one", async () => {
+  const owner = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const before = captures.filter((entry) => entry.kind === "checkout").length;
+
+  const res = await http("/app/billing/checkout", {
+    method: "POST",
+    jar: owner.jar,
+    form: { _csrf: owner.jar.get("cp_csrf"), plan: "starter" }
+  });
+
+  assert.equal(res.status, 303);
+  assert.match(res.location, /^\/app\/billing\?notice=/);
+  assert.equal(
+    captures.filter((entry) => entry.kind === "checkout").length,
+    before,
+    "a subscribed workspace must not be sent back to Checkout"
+  );
+
+  const price = captures.find((entry) => entry.kind === "price");
+  const change = captures.find((entry) => entry.kind === "switch");
+  assert.ok(price && change, "the switch should create a price and update the subscription");
+  assert.equal(price.form.unit_amount, "14900");
+  assert.equal(change.subscriptionId, "sub_test_1");
+  assert.equal(change.form["items[0][id]"], "si_1");
+  assert.equal(change.form["items[0][price]"], "price_starter");
+  assert.equal(change.form.proration_behavior, "create_prorations");
+
+  const row = db.prepare("SELECT plan, plan_status FROM tenants WHERE id = ?").get(tenantId);
+  assert.equal(row.plan, "starter");
+  assert.equal(row.plan_status, "active");
+
+  // Put the workspace back on Growth for the webhook test that follows.
+  subscriptions.set("sub_test_1", {
+    ...subscriptions.get("sub_test_1"),
+    metadata: { tenant_id: String(tenantId), plan: "growth" },
+    items: { data: [{ id: "si_1", price: { unit_amount: 39900, recurring: { interval: "month" } } }] }
+  });
 });
 
 test("a signed webhook applies the event once", async () => {

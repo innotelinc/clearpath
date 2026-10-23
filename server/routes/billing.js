@@ -12,8 +12,10 @@ import { audit, db } from "../db.js";
 import { originFor } from "../accounts.js";
 import {
   BillingError,
+  CHANGEABLE_STATUSES,
   PLANS,
   billingSummary,
+  changeSubscriptionPlan,
   createBillingPortalSession,
   createCheckoutSession,
   planByKey,
@@ -105,6 +107,27 @@ router.post("/checkout", async (req, res) => {
   }
 
   try {
+    // An active subscription is changed in place. Sending it through Checkout
+    // would create a second subscription on the same customer and bill twice.
+    if (
+      req.tenant.stripe_subscription_id &&
+      CHANGEABLE_STATUSES.includes(String(req.tenant.plan_status || ""))
+    ) {
+      const applied = await changeSubscriptionPlan({ tenant: req.tenant, plan });
+      audit(
+        req.tenant.id,
+        req.user.name,
+        "Changed plan",
+        `${plan.name} · ${plan.amount / 100} USD/month · prorated on ${applied.subscriptionId}`
+      );
+      return res.redirect(
+        303,
+        `/app/billing?notice=${encodeURIComponent(
+          `Plan changed to ${plan.name}. Stripe prorates the difference onto the next invoice — the existing subscription was updated, not duplicated.`
+        )}`
+      );
+    }
+
     const session = await createCheckoutSession({
       tenant: req.tenant,
       plan,

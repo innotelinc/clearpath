@@ -143,6 +143,7 @@ How the flow works:
 - Coming back with `?checkout=success&session_id=…` makes the server fetch that session from Stripe and sync the subscription — so billing works on a laptop with no public webhook URL.
 - `POST /webhooks/stripe` is the source of truth afterwards: `checkout.session.completed`, `customer.subscription.created|updated|deleted`, `invoice.paid` and `invoice.payment_failed` move `tenants.plan_status` between `active`, `trialing`, `past_due`, `unpaid`, `canceled` and the rest. Every event id is stored once in `billing_events`, so a Stripe retry cannot apply the same change twice.
 - The signature is **mandatory**: with no `STRIPE_WEBHOOK_SECRET` the endpoint answers `503` instead of trusting unsigned posts that claim a workspace is paid up.
+- **Changing plan** updates the subscription the workspace already has (a new `Price`, then `items[0][price]` on that subscription with `proration_behavior=create_prorations`) instead of opening a second Checkout — one subscription per workspace, never two invoices for the same month.
 - **Manage payment** opens the Stripe billing portal for invoices, card changes and cancellation. Cancelling there keeps access until the paid period ends; the workspace page then shows the cancellation date.
 - A failing payment does not lock a workspace out. The owner sees a banner on the billing page, the operator sees the status in the console, and Stripe keeps retrying.
 

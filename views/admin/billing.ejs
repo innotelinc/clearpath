@@ -120,7 +120,7 @@
           <% }) %>
         </div>
         <p class="tiny muted" style="margin-top:14px">
-          Switching plans starts a new subscription in Stripe; the old one is cancelled there, so you are never billed twice.
+          Switching plans updates the subscription you already have and prorates the difference onto the next invoice — no second subscription, no double charge. Cancelling stays in the billing portal.
           <% if (!billing.configured) { %>Choose is disabled until an operator configures the key.<% } %>
         </p>
       </div>
