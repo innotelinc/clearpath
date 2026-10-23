@@ -161,6 +161,32 @@ OMNIROUTE_API_KEY=…                                # the only AI gateway
 `.env` is read on boot (see `server/env.js`); Docker Compose reads the same file for
 interpolation and passes the mail variables through explicitly.
 
+### Stalwart checklist
+
+Work through this in order — each step fails differently, and the app error only points at
+the last one.
+
+1. **Listener.** Stalwart web admin → Settings → Network → Listeners. Keep an SMTP listener
+   on 587 (STARTTLS) or on 465 with `tlsImplicit: true`, and open that port in the firewall.
+   Confirm from outside: `openssl s_client -connect mail.denovocredit.com:587 -starttls smtp`
+   should print a `220` banner, not time out.
+2. **Sending mailbox.** Create a dedicated account such as `clearpath@denovocredit.com` —
+   not an administrator — and give it an application password. SMTP AUTH takes mailbox
+   credentials; Stalwart API keys are not valid for SMTP.
+3. **Sender authorization.** Settings → MTA → Session → AUTH stage. `mustMatchSender`
+   defaults to on, so `MAIL_FROM` must be that account's address or an alias added to the
+   account. Anything else is rejected after a successful login.
+4. **DNS.** Publish SPF for the sending domain including the Stalwart host's IP, enable DKIM
+   signing for the domain and publish its `selector._domainkey` TXT record, then a DMARC
+   record once the two align. Without them mail is delivered but scored as unauthenticated.
+5. **Point the app at it.** `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE=1` for 465, `SMTP_USER`,
+   `SMTP_PASS` and a `MAIL_FROM` from step 3. Restart; Settings → Email delivery should read
+   `smtp`, `host:port`, the TLS mode and `SMTP AUTH as …`. `SMTP_STARTTLS=0` belongs only on
+   a trusted local relay.
+6. **Prove it end to end.** Invite a client, or retry a message from the Mail log, and check
+   the row reads `sent` with provider `smtp`. A `535` in the error column is step 2, a sender
+   rejection is step 3, and a handshake failure is the listener certificate — not the app.
+
 > The Resend key supplied on 23 Oct was rejected by the API (`401 API key is invalid`), so
 > delivery is currently unconfigured and mail stays in the outbox. The planned provider is
 > a self-hosted **Stalwart** server: set `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` /
