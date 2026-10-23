@@ -49,8 +49,8 @@
   </div>
   <div class="card kpi">
     <div class="kpi-label">Sent</div>
-    <div class="kpi-value" style="font-size:18px"><%= pkg.sent_at ? fmtDate(pkg.sent_at) : "Not yet" %></div>
-    <div class="kpi-meta"><%= pkg.status === "Ready" ? "Waiting to be posted" : "Recorded at mailing" %></div>
+    <div class="kpi-value" style="font-size:18px"><%= pkg.sent_at ? fmtDate(pkg.sent_at) : pkg.status === "Ready" ? "Not yet" : "Before this build" %></div>
+    <div class="kpi-meta"><%= pkg.sent_at ? "Recorded at mailing" : pkg.status === "Ready" ? "Waiting to be posted" : "Sent before the archive existed" %></div>
   </div>
   <div class="card kpi">
     <div class="kpi-label">Letters</div>
