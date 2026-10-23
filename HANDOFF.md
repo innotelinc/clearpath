@@ -14,8 +14,8 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 | Tests | `npm test` — 25 end-to-end tests, all passing |
 | Dev server | `PORT=3400 DATA_DIR=./data node server/index.js` (log: `.server.log`) |
 | Production entry | `Dockerfile` + `docker-compose.yml` (image not built here: no Docker on this machine) |
-| Git | branch `main`, remote `https://github.com/innotelinc/clearpath.git`; last commit `1adbd83`; **this session's work is uncommitted** |
-| Push | Blocked earlier: no GitHub CLI and no stored credentials on this machine |
+| Git | branch `main`, pushed to `https://github.com/innotelinc/clearpath` (public) |
+| Latest commit | `940cd72` — provisioning/recovery + drafting studio (this handoff update follows it) |
 
 Demo sign-ins: `dana@denovocredit.com` / `Denovo!2026` (owner), `marcus@denovocredit.com` /
 `Specialist!2026`, `amara@example.com` / `Client!2026` (portal).
@@ -104,6 +104,13 @@ COOKIE_SECURE=1
 `.env` is read on boot (see `server/env.js`); Docker Compose reads the same file for
 interpolation and passes the mail variables through explicitly.
 
+> The Resend key supplied on 23 Oct was rejected by the API (`401 API key is invalid`), so
+> delivery is currently unconfigured and mail stays in the outbox. Drop a valid key into
+> `.env` (`RESEND_API_KEY=…`) together with a `MAIL_FROM` on a domain verified in Resend,
+> then restart. Nothing has been delivered to a real recipient yet.
+
+`.env` is gitignored; no credential belongs in a commit.
+
 ---
 
 ## Known gaps / sensible next steps
@@ -154,15 +161,11 @@ The project began as a single-file HTML prototype of "Clearpath" for Denovo Cred
 fabricated data and simulated AI. It was rebuilt as a real multi-tenant server app: marketing
 site, agency workspace, white-labelled portal, SQLite persistence, hash-chained audit log,
 server-generated PDFs, Docker packaging. The owner asked for a repo under the `innotelinc`
-GitHub account; `clearpath` was free (no repo of that name among the account's 151 public
-repos; `clearcredit` and `aicreditrepair` are separate projects). The push failed for lack of
-credentials — that remains the only unfinished setup step:
-
-```bash
-gh auth login
-gh repo create innotelinc/clearpath --public
-git push -u origin main
-```
+GitHub account; `clearpath` was free at the time (no repo of that name among the account's
+public repos; `clearcredit` and `aicreditrepair` are separate projects). The repo now exists
+as **public** at <https://github.com/innotelinc/clearpath> and `main` is pushed. There is no
+`gh` CLI on this machine — pushes authenticate through the Git Credential Manager entry for
+`innotelinc`, so plain `git push` works from this checkout.
 
 Commit identity is repo-local `Denovo Credit <hello@denovocredit.com>`; rewrite it if the
 commits should carry a personal identity.
