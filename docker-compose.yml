@@ -16,6 +16,12 @@ services:
       MAIL_FROM: ${MAIL_FROM:-Clearpath <no-reply@denovocredit.com>}
       MAIL_REPLY_TO: ${MAIL_REPLY_TO:-}
       MAIL_TRANSPORT: ${MAIL_TRANSPORT:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       POSTMARK_TOKEN: ${POSTMARK_TOKEN:-}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}

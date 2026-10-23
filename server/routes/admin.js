@@ -1120,7 +1120,7 @@ router.post("/mail-log/:id/retry", async (req, res) => {
   if (after.status === "sent") return back(res, "/app/mail-log", { notice: `Message to ${after.to_email} accepted by ${after.provider}.` });
   if (!mailConfigured) {
     return back(res, "/app/mail-log", {
-      error: "No mail provider is configured, so the message stays in this log. Set RESEND_API_KEY (or Postmark/SendGrid) and restart."
+      error: "No mail provider is configured, so the message stays in this log. Set SMTP_HOST/SMTP_USER/SMTP_PASS (or RESEND_API_KEY / POSTMARK_TOKEN / SENDGRID_API_KEY) and restart."
     });
   }
   back(res, "/app/mail-log", { error: `Still failing: ${after.error || "provider rejected the message"}` });

@@ -1,3 +1,4 @@
+import nodemailer from "nodemailer";
 import { db } from "./db.js";
 
 /**
@@ -9,24 +10,51 @@ import { db } from "./db.js";
  * demo or air-gapped install and an operator can inspect exactly what would
  * have been sent. Supported transports:
  *
+ *   smtp      SMTP_HOST (Stalwart, Postfix, any submission server)
  *   resend    RESEND_API_KEY
  *   postmark  POSTMARK_TOKEN
  *   sendgrid  SENDGRID_API_KEY
  *
- * `MAIL_TRANSPORT` forces one of them (or `outbox` to disable delivery).
+ * `MAIL_TRANSPORT` forces one of them (`smtp`/`stalwart`, `resend`, `postmark`,
+ * `sendgrid`) or `outbox` to disable delivery. Without it a configured
+ * `SMTP_HOST` wins, then the HTTPS providers in the order listed above.
  */
 
 const FROM = process.env.MAIL_FROM || "Clearpath <no-reply@denovocredit.com>";
 const REPLY_TO = process.env.MAIL_REPLY_TO || "";
 const TIMEOUT_MS = 8000;
 const MAX_ATTEMPTS = 4;
+const truthy = (value) => /^(1|true|yes|on)$/i.test(String(value || ""));
+const falsy = (value) => /^(0|false|no|off)$/i.test(String(value || ""));
+
+/**
+ * SMTP submission settings. Stalwart's defaults are mirrored here: implicit
+ * TLS on 465 (`SMTP_SECURE=1`) or STARTTLS on 587 (the default). `SMTP_STARTTLS=0`
+ * exists for a trusted local relay only — it lets the password cross the wire
+ * in the clear.
+ */
+const SMTP = (() => {
+  const secure = truthy(process.env.SMTP_SECURE);
+  return {
+    host: String(process.env.SMTP_HOST || "").trim(),
+    port: Number(process.env.SMTP_PORT || 0) || (secure ? 465 : 587),
+    secure,
+    starttls: !falsy(process.env.SMTP_STARTTLS),
+    user: String(process.env.SMTP_USER || "").trim(),
+    pass: String(process.env.SMTP_PASS || "")
+  };
+})();
+
+const smtpConfigured = Boolean(SMTP.host);
 
 export const transport = (() => {
   const forced = String(process.env.MAIL_TRANSPORT || "").toLowerCase();
   if (forced === "outbox" || forced === "none") return "outbox";
+  if ((forced === "smtp" || forced === "stalwart") && smtpConfigured) return "smtp";
   if (forced === "resend" && process.env.RESEND_API_KEY) return "resend";
   if (forced === "postmark" && process.env.POSTMARK_TOKEN) return "postmark";
   if (forced === "sendgrid" && process.env.SENDGRID_API_KEY) return "sendgrid";
+  if (smtpConfigured) return "smtp";
   if (process.env.RESEND_API_KEY) return "resend";
   if (process.env.POSTMARK_TOKEN) return "postmark";
   if (process.env.SENDGRID_API_KEY) return "sendgrid";
@@ -36,7 +64,34 @@ export const transport = (() => {
 export const mailConfigured = transport !== "outbox";
 
 export function mailStatus() {
-  return { transport, from: FROM, configured: mailConfigured };
+  return {
+    transport,
+    from: FROM,
+    configured: mailConfigured,
+    server: transport === "smtp" ? `${SMTP.host}:${SMTP.port}` : "",
+    security:
+      transport === "smtp" ? (SMTP.secure ? "implicit TLS" : SMTP.starttls ? "STARTTLS" : "no TLS") : "",
+    auth: transport === "smtp" ? (SMTP.user ? `SMTP AUTH as ${SMTP.user}` : "no SMTP AUTH") : ""
+  };
+}
+
+let smtpClient = null;
+
+function smtpTransporter() {
+  if (!smtpClient) {
+    smtpClient = nodemailer.createTransport({
+      host: SMTP.host,
+      port: SMTP.port,
+      secure: SMTP.secure,
+      ...(SMTP.secure ? {} : SMTP.starttls ? { requireTLS: true } : { ignoreTLS: true }),
+      ...(SMTP.user ? { auth: { user: SMTP.user, pass: SMTP.pass } } : {}),
+      tls: { minVersion: "TLSv1.2" },
+      connectionTimeout: TIMEOUT_MS,
+      greetingTimeout: TIMEOUT_MS,
+      socketTimeout: TIMEOUT_MS
+    });
+  }
+  return smtpClient;
 }
 
 function htmlEscape(value) {
@@ -76,7 +131,17 @@ async function postJson(url, headers, payload) {
 }
 
 async function deliverWithProvider({ to, subject, text, html }) {
-  const reply = REPLY_TO ? { "reply-to": REPLY_TO } : {};
+  if (transport === "smtp") {
+    await smtpTransporter().sendMail({
+      from: FROM,
+      to,
+      subject,
+      text,
+      html,
+      ...(REPLY_TO ? { replyTo: REPLY_TO } : {})
+    });
+    return "smtp";
+  }
   if (transport === "resend") {
     await postJson(
       "https://api.resend.com/emails",

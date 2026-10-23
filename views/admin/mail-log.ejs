@@ -17,7 +17,9 @@
     <div class="grow">
       <strong>No mail provider is configured.</strong>
       Messages are recorded here instead of being delivered, so invitations and reset links stay reviewable.
-      Set <code>RESEND_API_KEY</code> (or <code>POSTMARK_TOKEN</code> / <code>SENDGRID_API_KEY</code>) and restart to send for real.
+      Set <code>SMTP_HOST</code> / <code>SMTP_USER</code> / <code>SMTP_PASS</code> (Stalwart or any SMTP
+      submission server), or <code>RESEND_API_KEY</code> / <code>POSTMARK_TOKEN</code> /
+      <code>SENDGRID_API_KEY</code>, and restart to send for real.
     </div>
   </div>
 <% } %>

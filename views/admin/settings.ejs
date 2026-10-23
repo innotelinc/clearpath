@@ -181,6 +181,10 @@
       <div class="card-body">
         <dl class="def-list">
           <div><dt>Transport</dt><dd class="mono"><%= mail.transport %></dd></div>
+          <% if (mail.server) { %>
+            <div><dt>Server</dt><dd class="mono"><%= mail.server %> · <%= mail.security %></dd></div>
+            <div><dt>Authentication</dt><dd><%= mail.auth %></dd></div>
+          <% } %>
           <div><dt>From</dt><dd><%= mail.from %></dd></div>
           <div><dt>Waiting</dt><dd><%= queuedMail %> message<%= queuedMail === 1 ? "" : "s" %> in the outbox</dd></div>
         </dl>
@@ -190,8 +194,10 @@
             <div>No provider configured. Emails are recorded in the <a href="/app/mail-log">Mail log</a> but not delivered.</div>
           </div>
           <p class="tiny muted" style="margin-top:10px">
-            Set <code>RESEND_API_KEY</code>, <code>POSTMARK_TOKEN</code> or <code>SENDGRID_API_KEY</code> (plus
-            <code>MAIL_FROM</code> on a verified domain) and restart the container.
+            Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code> and <code>SMTP_PASS</code>
+            for Stalwart or any SMTP submission server, or <code>RESEND_API_KEY</code> /
+            <code>POSTMARK_TOKEN</code> / <code>SENDGRID_API_KEY</code> (plus <code>MAIL_FROM</code> on an
+            address your provider authorises) and restart the container.
           </p>
         <% } else { %>
           <p class="tiny muted" style="margin-top:10px">Failed messages retry automatically four times before staying in the log for manual retry.</p>

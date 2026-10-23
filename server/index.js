@@ -6,7 +6,7 @@ import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
 import { db, ensurePlatformAdmin, seedDemo, tenantForHost, tenantStats } from "./db.js";
 import { aiConfigured, aiLabel } from "./ai.js";
-import { retryPending } from "./mail.js";
+import { mailStatus, retryPending } from "./mail.js";
 import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass, trackingUrl } from "./util.js";
 import publicRoutes from "./routes/public.js";
 import authRoutes from "./routes/auth.js";
@@ -39,6 +39,13 @@ if (lobConfigured) {
   if (!lobWebhookSecret) {
     console.warn("Clearpath: LOB_WEBHOOK_SECRET is not set, so /webhooks/lob accepts unsigned delivery events");
   }
+}
+
+const mail = mailStatus();
+if (mail.configured) {
+  console.log(
+    `Clearpath: mail delivery via ${mail.transport}${mail.server ? ` — ${mail.server} · ${mail.security} · ${mail.auth}` : ""}`
+  );
 }
 
 const platformAdmin = ensurePlatformAdmin();

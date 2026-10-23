@@ -198,7 +198,21 @@ Three bureau scores with movement since intake, utilization, open and closed dis
 
 ### Email delivery
 
-The app writes every message to an `emails` outbox first, then hands it to the configured provider. With no provider configured nothing is delivered — the message stays in the Mail log (`/app/mail-log`) with its full body, which keeps demos and air-gapped installs coherent. Supported transports are Resend, Postmark and SendGrid over plain HTTPS (`server/mail.js`, no SDK). Failures retry automatically four times with a one-minute floor, then stay in the log for a manual retry.
+The app writes every message to an `emails` outbox first, then hands it to the configured provider. With no provider configured nothing is delivered — the message stays in the Mail log (`/app/mail-log`) with its full body, which keeps demos and air-gapped installs coherent. Supported transports are an SMTP submission server (Stalwart, Postfix, Mailcow — `server/mail.js` via nodemailer) and Resend, Postmark and SendGrid over HTTPS. Failures retry automatically four times with a one-minute floor, then stay in the log for a manual retry.
+
+#### Sending through Stalwart
+
+Stalwart is a mail server, so delivery goes out over SMTP submission rather than a REST API. Configuration is environment-only, and the sender address must belong to the authenticated account:
+
+| Variable | Example | Notes |
+| --- | --- | --- |
+| `MAIL_TRANSPORT` | `smtp` | `stalwart` is accepted too. Without it, a set `SMTP_HOST` wins over the HTTPS providers |
+| `SMTP_HOST` | `mail.denovocredit.com` | Hostname on the TLS certificate, not an IP |
+| `SMTP_PORT` | `465` with `SMTP_SECURE=1`, or `587` | 465 is implicit TLS; 587 upgrades with STARTTLS (the default) |
+| `SMTP_USER` / `SMTP_PASS` | `clearpath@denovocredit.com` / application password | A dedicated mailbox, not an administrator login |
+| `MAIL_FROM` | `Clearpath <clearpath@denovocredit.com>` | Must be the account or one of its addresses — `mustMatchSender` is on by default |
+
+In Stalwart, check that an SMTP listener is reachable on the chosen port (**Settings → Network → Listeners**, with `tlsImplicit` for 465), and publish SPF and DKIM for the sending domain — without them Stalwart delivers, but recipients score the mail as unauthenticated. Authentication failures are logged and the session is dropped after three bad attempts. `SMTP_STARTTLS=0` turns the upgrade off and belongs only on a trusted local relay: the password crosses the wire in the clear.
 
 ### Drafting studio
 
@@ -223,7 +237,7 @@ server/
   auth.js         sessions, CSRF, role guards, rate limiting
   security.js     scrypt hashing, tokens, timing-safe comparison
   accounts.js     provisioning, reset tokens, credential emails
-  mail.js         outbox, Resend/Postmark/SendGrid transports, retries
+  mail.js         outbox, SMTP (Stalwart) and Resend/Postmark/SendGrid transports, retries
   studio.js       dispute drafting engine (rules, confidence, citations)
   db.js           schema, migrations, tenant routing, audit chain, reference numbers, demo seed
   data.js         tenant-scoped queries
@@ -275,8 +289,10 @@ test/             node:test end-to-end suite
 | `COOKIE_SECURE` | on in production | `1` behind HTTPS, `0` for plain-HTTP local use |
 | `SUPPORT_EMAIL` | `hello@denovocredit.com` | Fallback contact address |
 | `APP_ORIGIN` | derived | Absolute base URL used in emailed reset and invitation links — set it in production |
-| `RESEND_API_KEY` / `POSTMARK_TOKEN` / `SENDGRID_API_KEY` | unset | Enables delivery; with none set, mail stays in the in-app log |
-| `MAIL_TRANSPORT` | auto | Force `resend`, `postmark`, `sendgrid` or `outbox` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | unset | SMTP submission server (Stalwart and friends); with no provider set, mail stays in the in-app log |
+| `SMTP_SECURE` / `SMTP_STARTTLS` | `0` / on | `SMTP_SECURE=1` for implicit TLS (465); `SMTP_STARTTLS=0` only for a trusted relay without TLS |
+| `RESEND_API_KEY` / `POSTMARK_TOKEN` / `SENDGRID_API_KEY` | unset | HTTPS mail APIs; used when no SMTP server is configured |
+| `MAIL_TRANSPORT` | auto | Force `smtp` (`stalwart`), `resend`, `postmark`, `sendgrid` or `outbox` |
 | `MAIL_FROM` | `Clearpath <no-reply@denovocredit.com>` | Sender on a domain verified with your provider |
 | `MAIL_REPLY_TO` | unset | Optional reply address |
 | `LOB_API_KEY` / `LOB_WEBHOOK_SECRET` / `LOB_BASE_URL` | unset | Enables certified print-and-mail through Lob; see the Lob section above |
@@ -315,7 +331,7 @@ npm test
 
 The suite spawns the real server on a temporary data directory and drives it over HTTP: health, marketing and legal pages, session requirements, failed and successful sign-in, role restrictions, host-based tenant routing, cross-tenant 404s, portal scoping, PDF magic bytes, the full intake → tradeline → dispute → package → mailed workflow, multipart upload (valid and spoofed), CSRF rejection, logout, invitation email → forced password change, a reset link working exactly once and dropping other sessions, studio draft → approved dispute with edited letter text, the mail log and its retry guard, reset-request rate limiting, Lob send + signed delivery webhook, platform provisioning and suspension, and billing checkout → success redirect → signed Stripe webhook → workspace status, all against a local Stripe stand-in.
 
-Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox), letters actually printed by Lob, money actually moving through Stripe (the suite speaks to a mock) or Docker image builds.
+Tests do not cover visual regressions, delivery by a real mail provider (the suite asserts the outbox and drives the SMTP path against a local stub), letters actually printed by Lob, money actually moving through Stripe (the suite speaks to a mock) or Docker image builds.
 
 ---
 
@@ -334,6 +350,6 @@ Tests do not cover visual regressions, delivery by a real mail provider (the sui
 ### Not included (by design)
 
 - No billing, SMS, bureau integrations or credit-report parsing, and no LLM call anywhere — the studio is a deterministic drafter.
-- No SMTP transport: providers are HTTPS APIs. Add a transport in `server/mail.js` if you need a mailbox relay.
+- No inbound mail: the app only sends. Replies go to `MAIL_REPLY_TO`, and Stalwart's mailbox is where you read them.
 - No delete/archive UI for users, clients or documents (deactivation is a schema change away).
 - No email verification for teammates: an owner types the address, and the invitation goes there.

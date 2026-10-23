@@ -146,8 +146,10 @@ mail is still printed and posted by hand unless Lob is enabled (below).
 
 ```bash
 APP_ORIGIN=https://app.denovocredit.com     # required for correct emailed links
-MAIL_FROM="Denovo Credit <no-reply@denovocredit.com>"   # verified domain
-RESEND_API_KEY=…        # or POSTMARK_TOKEN / SENDGRID_API_KEY
+MAIL_FROM="Denovo Credit <no-reply@denovocredit.com>"   # authorised sender
+SMTP_HOST=mail.denovocredit.com  SMTP_PORT=465  SMTP_SECURE=1
+SMTP_USER=…  SMTP_PASS=…   # Stalwart mailbox or application password
+# or one HTTPS API instead: RESEND_API_KEY / POSTMARK_TOKEN / SENDGRID_API_KEY
 SEED_DEMO=0
 COOKIE_SECURE=1
 PLATFORM_ADMIN_EMAIL=…  PLATFORM_ADMIN_PASSWORD=…   # replaces the demo operator
@@ -160,9 +162,11 @@ OMNIROUTE_API_KEY=…                                # the only AI gateway
 interpolation and passes the mail variables through explicitly.
 
 > The Resend key supplied on 23 Oct was rejected by the API (`401 API key is invalid`), so
-> delivery is currently unconfigured and mail stays in the outbox. Drop a valid key into
-> `.env` (`RESEND_API_KEY=…`) together with a `MAIL_FROM` on a domain verified in Resend,
-> then restart. Nothing has been delivered to a real recipient yet.
+> delivery is currently unconfigured and mail stays in the outbox. The planned provider is
+> a self-hosted **Stalwart** server: set `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` /
+> `SMTP_PASS` and a `MAIL_FROM` the mailbox is allowed to send as, then restart. Keep
+> `MAIL_TRANSPORT` unset (a set `SMTP_HOST` wins) or force it to `smtp`. Nothing has been
+> delivered to a real recipient yet.
 
 `.env` is gitignored; no credential belongs in a commit.
 
