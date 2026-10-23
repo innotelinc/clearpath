@@ -1,0 +1,230 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Good to see you, <%= user.name.split(" ")[0] %></h1>
+    <p><%= stats.clients %> clients · <%= stats.openDisputes %> open disputes · <%= stats.readyPackages %> packages ready to mail</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/mailroom">Mailroom</a>
+    <button class="btn btn-primary" type="button" data-open="new-client">
+      <svg><use href="#i-plus"/></svg> New client
+    </button>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="card kpi">
+    <div class="kpi-label">Active clients</div>
+    <div class="kpi-value"><%= stats.clients %></div>
+    <div class="kpi-meta">Across <%= stages.length %> pipeline stages</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Open disputes</div>
+    <div class="kpi-value"><%= stats.openDisputes %></div>
+    <div class="kpi-meta <%= stats.awaiting ? 'warn' : '' %>"><%= stats.awaiting %> awaiting a bureau response</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Items removed</div>
+    <div class="kpi-value"><%= stats.removed %></div>
+    <div class="kpi-meta up">Verified deletions on file</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Needs a human</div>
+    <div class="kpi-value"><%= stats.pendingDocs + stats.readyPackages %></div>
+    <div class="kpi-meta"><%= stats.pendingDocs %> documents · <%= stats.readyPackages %> packages</div>
+  </div>
+</div>
+
+<div class="dash-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Dispute pipeline</h2>
+          <p>Most recent open items, newest first</p>
+        </div>
+        <a class="btn btn-sm" href="/app/disputes">View all</a>
+      </div>
+      <% if (!open.length) { %>
+        <div class="empty">
+          <h3>No open disputes</h3>
+          <p>Open a client and add a tradeline to draft the first letter.</p>
+        </div>
+      <% } else { %>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr><th>Client</th><th>Account</th><th>Bureau</th><th>Round</th><th>Status</th><th>Due</th></tr>
+            </thead>
+            <tbody>
+              <% open.forEach((d) => { %>
+                <tr>
+                  <td><a class="link" href="/app/disputes/<%= d.id %>"><%= d.client_name %></a></td>
+                  <td><span class="truncate" style="display:inline-block;max-width:190px"><%= d.account %></span></td>
+                  <td><%= bureau[d.bureau] ? bureau[d.bureau].short : d.bureau %></td>
+                  <td class="num"><%= d.round %></td>
+                  <td><span class="badge <%= statusClass(d.status) %>"><%= d.status %></span></td>
+                  <td class="nowrap"><%= d.due || "—" %></td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Activity</h2>
+          <p>Audit trail, hash-chained</p>
+        </div>
+        <a class="btn btn-sm" href="/app/audit">Audit log</a>
+      </div>
+      <div class="feed">
+        <% if (!recentAudit.length) { %>
+          <div class="empty"><p>Nothing recorded yet.</p></div>
+        <% } %>
+        <% recentAudit.forEach((entry) => { %>
+          <div class="feed-row">
+            <span class="feed-dot"></span>
+            <div>
+              <div class="body"><strong><%= entry.actor_name %></strong> <%= entry.action %> <span class="muted"><%= entry.target %></span></div>
+              <time datetime="<%= entry.created_at %>"><%= fmtDateTime(entry.created_at) %> · #<%= entry.seq %></time>
+            </div>
+          </div>
+        <% }) %>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Ready to mail</h2>
+          <p>Printed and certified in one pass</p>
+        </div>
+        <span class="badge <%= ready.length ? 'violet' : 'gray' %>"><%= ready.length %></span>
+      </div>
+      <% if (!ready.length) { %>
+        <div class="empty">
+          <h3>Mailroom is clear</h3>
+          <p>Approve a dispute and package it from the mailroom.</p>
+        </div>
+      <% } else { %>
+        <div class="list-rows">
+          <% ready.forEach((p) => { %>
+            <div class="list-row">
+              <span class="avatar"><%= bureau[p.bureau] ? bureau[p.bureau].short : "—" %></span>
+              <div class="grow">
+                <div class="title"><%= p.client_name %></div>
+                <div class="meta"><%= p.ref %> · <%= p.letters %> letter<%= p.letters === 1 ? "" : "s" %> · <%= money(p.cost) %></div>
+              </div>
+              <span class="badge amber">Ready</span>
+            </div>
+          <% }) %>
+        </div>
+        <div class="card-foot row-between">
+          <a class="btn btn-sm" href="/app/mailroom/labels.pdf">Labels PDF</a>
+          <a class="btn btn-sm" href="/app/mailroom/queue.pdf">Print queue</a>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Documents to review</h2>
+          <p>Uploaded, not yet verified</p>
+        </div>
+        <a class="btn btn-sm" href="/app/documents">Vault</a>
+      </div>
+      <% if (!pendingDocs.length) { %>
+        <div class="empty"><p>Every document is verified.</p></div>
+      <% } else { %>
+        <div class="list-rows">
+          <% pendingDocs.forEach((doc) => { %>
+            <div class="list-row">
+              <svg style="width:17px;height:17px;color:var(--ink-3)"><use href="#i-file"/></svg>
+              <div class="grow">
+                <div class="title truncate"><%= doc.name %></div>
+                <div class="meta"><%= doc.client_name %> · <%= doc.type %> · <%= doc.size || "—" %></div>
+              </div>
+              <form method="post" action="/app/documents/<%= doc.id %>/verify">
+                <input type="hidden" name="_csrf" value="<%= csrf %>">
+                <button class="btn btn-sm" type="submit">Verify</button>
+              </form>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Client stages</h2><p>Where the book sits today</p></div></div>
+      <div class="card-body">
+        <%
+          const total = stages.reduce((sum, s) => sum + s.n, 0) || 1;
+          const colours = { Active: "var(--teal)", Onboarding: "var(--violet)", Review: "var(--amber)", Graduated: "var(--blue)" };
+        %>
+        <div class="stage-bar" role="img" aria-label="Client stage distribution">
+          <% stages.forEach((s) => { %>
+            <span style="width:<%= Math.round((s.n / total) * 100) %>%;background:<%= colours[s.stage] || 'var(--ink-4)' %>"></span>
+          <% }) %>
+        </div>
+        <div class="stage-legend">
+          <% stages.forEach((s) => { %>
+            <div><i style="background:<%= colours[s.stage] || 'var(--ink-4)' %>"></i><%= s.stage %><span class="n"><%= s.n %></span></div>
+          <% }) %>
+          <% if (!stages.length) { %><p class="small muted">No clients yet.</p><% } %>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<dialog class="modal" id="new-client" aria-labelledby="new-client-title">
+  <form method="post" action="/app/clients">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="new-client-title">New client</h2>
+        <p>Intake creates the case record and a portal invitation you can send when ready.</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label for="nc-name">Full name</label>
+          <input class="input" id="nc-name" name="name" required minlength="2" maxlength="80" placeholder="Jordan Alvarez">
+        </div>
+        <div class="field">
+          <label for="nc-email">Email</label>
+          <input class="input" id="nc-email" name="email" type="email" required maxlength="120" placeholder="jordan@example.com">
+        </div>
+        <div class="field">
+          <label for="nc-phone">Phone</label>
+          <input class="input" id="nc-phone" name="phone" maxlength="40" placeholder="(415) 555-0142">
+        </div>
+        <div class="field span-2">
+          <label for="nc-stage">Stage</label>
+          <select class="select" id="nc-stage" name="stage">
+            <option>Onboarding</option>
+            <option>Active</option>
+            <option>Review</option>
+            <option>Graduated</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit" data-busy-label="Creating…">Create client</button>
+    </div>
+  </form>
+</dialog>
+
+<%- include("../partials/app-foot") %>

@@ -1,0 +1,103 @@
+<%
+  const brand = tenant || hostTenant;
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+  const counts = navCounts || {};
+  const nav = [
+    { key: "dashboard", label: "Overview", href: "/app", icon: "i-home" },
+    { key: "clients", label: "Clients", href: "/app/clients", icon: "i-users", count: counts.clients },
+    { key: "disputes", label: "Disputes", href: "/app/disputes", icon: "i-file", count: counts.openDisputes },
+    { key: "mailroom", label: "Mailroom", href: "/app/mailroom", icon: "i-mail", count: counts.readyPackages },
+    { key: "documents", label: "Documents", href: "/app/documents", icon: "i-folder", count: counts.pendingDocs },
+    { key: "audit", label: "Audit log", href: "/app/audit", icon: "i-shield" },
+    { key: "settings", label: "Settings", href: "/app/settings", icon: "i-settings", ownerOnly: true }
+  ];
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · <%= siteName %> · Clearpath</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("icons") %>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="/app">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block">Clearpath</span>
+        </span>
+      </a>
+
+      <div class="side-nav" aria-label="Workspace">
+        <% nav.forEach((item) => { if (item.ownerOnly && user.role !== "owner") return; %>
+          <a class="nav-item <%= page === item.key ? 'is-active' : '' %>" href="<%= item.href %>"
+             <%= page === item.key ? 'aria-current="page"' : '' %>>
+            <svg><use href="#<%= item.icon %>"/></svg>
+            <span><%= item.label %></span>
+            <% if (item.count) { %><span class="count"><%= item.count %></span><% } %>
+          </a>
+        <% }) %>
+      </div>
+
+      <div class="side-group">Live portal</div>
+      <div class="side-nav">
+        <a class="nav-item" href="/portal/login" target="_blank" rel="noopener">
+          <svg><use href="#i-arrow"/></svg>
+          <span>Client sign-in</span>
+        </a>
+      </div>
+
+      <div class="side-foot">
+        <div class="side-user">
+          <span class="avatar dark"><%= initials(user.name) %></span>
+          <div class="grow">
+            <div class="name truncate"><%= user.name %></div>
+            <div class="role"><%= user.role %></div>
+          </div>
+        </div>
+        <form class="side-logout" method="post" action="/logout">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button type="submit"><svg><use href="#i-out"/></svg>Sign out</button>
+        </form>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-toggle" type="button" data-toggle="sidebar" aria-expanded="false" aria-controls="sidebar" aria-label="Menu">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+        <div class="crumb"><%= siteName %> <span aria-hidden="true">/</span> <strong><%= title %></strong></div>
+        <div class="spacer"></div>
+        <form class="topbar-search" method="get" action="/app/clients" role="search">
+          <svg><use href="#i-search"/></svg>
+          <input type="search" name="q" placeholder="Search clients" aria-label="Search clients" data-quick-search value="<%= page === 'clients' && typeof q !== 'undefined' ? q : '' %>">
+        </form>
+        <a class="icon-btn" href="/app/disputes" aria-label="Open disputes">
+          <svg><use href="#i-bell"/></svg>
+        </a>
+      </header>
+
+      <main class="content" id="main">
+        <% if (notice) { %>
+          <div class="notice notice-ok" role="status">
+            <svg><use href="#i-check"/></svg>
+            <div class="grow"><%= notice %></div>
+            <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss"><svg><use href="#i-x"/></svg></button>
+          </div>
+        <% } %>
+        <% if (error) { %>
+          <div class="notice notice-error" role="alert">
+            <svg><use href="#i-alert"/></svg>
+            <div class="grow"><%= error %></div>
+            <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss"><svg><use href="#i-x"/></svg></button>
+          </div>
+        <% } %>

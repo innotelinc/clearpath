@@ -1,0 +1,146 @@
+<%- include("../partials/app-head", { title }) %>
+
+<%
+  let evidence = [];
+  try { evidence = JSON.parse(tradeline.evidence || "[]"); } catch (e) { evidence = []; }
+  const b = bureau[dispute.bureau];
+%>
+
+<div class="page-head">
+  <div>
+    <h1><%= dispute.ref %></h1>
+    <div class="row" style="margin-top:6px">
+      <a class="link small" href="/app/clients/<%= dispute.client_id %>"><%= dispute.client_name %></a>
+      <span class="muted small">·</span>
+      <span class="small muted"><%= dispute.account %></span>
+      <span class="badge <%= statusClass(dispute.status) %>"><%= dispute.status %></span>
+      <span class="badge plain <%= dispute.round > 1 ? 'amber' : 'gray' %>">Round <%= dispute.round %></span>
+      <span class="badge plain <%= dispute.confidence >= 85 ? 'teal' : 'amber' %>"><%= dispute.confidence %>% confidence</span>
+    </div>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/disputes">All disputes</a>
+    <a class="btn btn-primary" href="/app/disputes/<%= dispute.id %>/letter.pdf">
+      <svg><use href="#i-download"/></svg> Letter PDF
+    </a>
+  </div>
+</div>
+
+<div class="dash-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2>Letter to <%= b ? b.name : dispute.bureau %></h2>
+          <p>Generated from the case record, the client's file and the evidence list</p>
+        </div>
+        <button class="btn btn-sm" type="button" data-copy-from="letter-source">Copy text</button>
+      </div>
+      <div class="card-body">
+        <div class="letter-paper" id="letter"><%= letter %></div>
+        <textarea id="letter-source" hidden aria-hidden="true" tabindex="-1"><%= letter %></textarea>
+      </div>
+      <div class="card-foot row-between">
+        <span class="tiny muted">Cites 15 U.S.C. § 1681i and § 1681e(b). Reviewed before mailing.</span>
+        <a class="btn btn-sm" href="/app/disputes/<%= dispute.id %>/letter.pdf">Download</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Evidence on file</h2><p>Every claim in the letter should have a document behind it</p></div></div>
+      <div class="card-body">
+        <% if (!evidence.length) { %>
+          <p class="small muted">No evidence attached to this tradeline. Add documents to the client's vault before mailing.</p>
+        <% } else { %>
+          <div class="row wrap" style="gap:8px">
+            <% evidence.forEach((item) => { %>
+              <span class="chip"><svg style="width:12px;height:12px;color:var(--teal)"><use href="#i-check"/></svg><%= item %></span>
+            <% }) %>
+          </div>
+        <% } %>
+        <div class="row" style="margin-top:16px">
+          <a class="btn btn-sm" href="/app/clients/<%= dispute.client_id %>">Open client file</a>
+          <a class="btn btn-sm btn-ghost" href="/app/documents">Document vault</a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head"><div><h2>Status</h2><p>Changing status is written to the audit log</p></div></div>
+      <form class="card-body stack" method="post" action="/app/disputes/<%= dispute.id %>">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="field">
+          <label for="st-status">Status</label>
+          <select class="select" id="st-status" name="status">
+            <% statuses.forEach((s) => { %>
+              <option value="<%= s %>" <%= dispute.status === s ? "selected" : "" %>><%= s %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label for="st-round">Round</label>
+            <select class="select" id="st-round" name="round">
+              <% [1,2,3,4,5].forEach((n) => { %>
+                <option value="<%= n %>" <%= dispute.round === n ? "selected" : "" %>><%= n %></option>
+              <% }) %>
+            </select>
+          </div>
+          <div class="field">
+            <label for="st-mailed">Mailed</label>
+            <input class="input" id="st-mailed" name="mailed" maxlength="25" value="<%= dispute.mailed || '' %>" placeholder="Oct 14">
+          </div>
+          <div class="field span-2">
+            <label for="st-due">Response due</label>
+            <input class="input" id="st-due" name="due" maxlength="25" value="<%= dispute.due || '' %>" placeholder="Nov 12">
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit">Save status</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Case details</h2></div></div>
+      <div class="card-body">
+        <dl class="def-list">
+          <div><dt>Bureau</dt><dd><%= b ? b.name : dispute.bureau %></dd></div>
+          <div><dt>Account</dt><dd><%= dispute.account %></dd></div>
+          <div><dt>Creditor</dt><dd><%= tradeline.creditor %></dd></div>
+          <div><dt>Type</dt><dd><%= tradeline.type %></dd></div>
+          <div><dt>Balance</dt><dd><%= money(tradeline.balance) %></dd></div>
+          <div><dt>Theory</dt><dd><%= dispute.issue %></dd></div>
+          <div><dt>Confidence</dt><dd><%= dispute.confidence %>%</dd></div>
+          <div><dt>Created</dt><dd><%= fmtDate(dispute.created_at) %></dd></div>
+          <% if (shipment) { %>
+            <div><dt>Package</dt><dd><%= shipment.ref %> · <%= shipment.status %></dd></div>
+            <div><dt>Service</dt><dd><%= shipment.method %></dd></div>
+            <div><dt>Tracking</dt><dd class="mono"><%= shipment.tracking || "Not yet assigned" %></dd></div>
+          <% } %>
+        </dl>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Next step</h2></div></div>
+      <div class="card-body stack" style="gap:10px">
+        <% if (["Needs review", "Queued"].includes(dispute.status)) { %>
+          <p class="small">Approve the letter, then build a package in the mailroom. Packages group letters by client and bureau.</p>
+          <a class="btn btn-primary btn-sm" href="/app/mailroom">Go to mailroom</a>
+        <% } else if (dispute.status === "Mailed" || dispute.status === "Awaiting response") { %>
+          <p class="small">The bureau has 30 days from receipt. Record their response in the vault, then set the next status here.</p>
+          <a class="btn btn-sm" href="/app/documents">Upload bureau response</a>
+        <% } else if (dispute.status === "Escalated") { %>
+          <p class="small">Escalated cases keep the same history. Attach the complaint reference in the client's notes.</p>
+          <a class="btn btn-sm" href="/app/clients/<%= dispute.client_id %>">Open client file</a>
+        <% } else { %>
+          <p class="small">This dispute is closed. If the item reappears, start a new round from the client's tradelines.</p>
+          <a class="btn btn-sm" href="/app/clients/<%= dispute.client_id %>">Open client file</a>
+        <% } %>
+      </div>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/app-foot") %>

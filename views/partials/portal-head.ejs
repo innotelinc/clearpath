@@ -1,0 +1,65 @@
+<%
+  const brand = tenant || hostTenant;
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+  const items = [
+    { key: "overview", label: "Your file", href: "/portal" },
+    { key: "disputes", label: "Disputes", href: "/portal/disputes" },
+    { key: "documents", label: "Documents", href: "/portal/documents" },
+    { key: "messages", label: "Messages", href: "/portal/messages" },
+    { key: "score", label: "Score history", href: "/portal/score" }
+  ];
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · <%= siteName %></title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body class="portal">
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("icons") %>
+  <header class="portal-head">
+    <div class="wrap portal-head-inner">
+      <a class="brand" href="/portal">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block"><%= brand ? brand.portal_name : "Client portal" %></span>
+        </span>
+      </a>
+      <nav class="portal-nav" aria-label="Portal">
+        <% items.forEach((item) => { %>
+          <a href="<%= item.href %>" class="<%= page === item.key ? 'is-active' : '' %>"
+             <%= page === item.key ? 'aria-current="page"' : '' %>><%= item.label %></a>
+        <% }) %>
+      </nav>
+      <div class="portal-user">
+        <span class="avatar" aria-hidden="true"><%= initials(user.name) %></span>
+        <span class="truncate" style="max-width:130px"><%= user.name %></span>
+        <form method="post" action="/logout">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <button class="btn btn-sm btn-ghost" type="submit">Sign out</button>
+        </form>
+      </div>
+    </div>
+  </header>
+  <main class="portal-main" id="main">
+    <% if (notice) { %>
+      <div class="notice notice-ok" role="status">
+        <svg><use href="#i-check"/></svg>
+        <div class="grow"><%= notice %></div>
+        <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss"><svg><use href="#i-x"/></svg></button>
+      </div>
+    <% } %>
+    <% if (error) { %>
+      <div class="notice notice-error" role="alert">
+        <svg><use href="#i-alert"/></svg>
+        <div class="grow"><%= error %></div>
+        <button class="icon-btn" type="button" data-dismiss aria-label="Dismiss"><svg><use href="#i-x"/></svg></button>
+      </div>
+    <% } %>

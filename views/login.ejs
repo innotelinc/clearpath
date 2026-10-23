@@ -1,0 +1,124 @@
+<%
+  const brand = tenant || hostTenant;
+  const isClient = mode === "client";
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0b1424">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("partials/icons") %>
+  <div class="auth-page">
+    <aside class="auth-aside">
+      <a class="brand" href="/" style="color:#fff">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block;color:#8698b3">Clearpath platform</span>
+        </span>
+      </a>
+      <div>
+        <h2><%= isClient ? "Your file, without the phone tag." : "Every case, one timeline." %></h2>
+        <p>
+          <%= isClient
+            ? "See your three bureau scores, what was mailed and when, and exactly which document your specialist still needs."
+            : "Disputes, evidence, certified mail and client communication in a single workspace — with an audit trail behind every change." %>
+        </p>
+        <ul>
+          <% (isClient ? [
+            "Scores and movement per bureau",
+            "Dispute status in plain language",
+            "Upload requests with a due date",
+            "A direct thread with your specialist"
+          ] : [
+            "Evidence-backed dispute drafts",
+            "Certified mailroom with tracking",
+            "White-labelled client portal",
+            "Hash-chained audit log"
+          ]).forEach((item) => { %>
+            <li><svg><use href="#i-check"/></svg><span><%= item %></span></li>
+          <% }) %>
+        </ul>
+      </div>
+      <p class="foot">© <%= new Date().getFullYear() %> Denovo Credit · denovocredit.com</p>
+    </aside>
+
+    <main class="auth-main" id="main">
+      <div class="auth-card">
+        <a class="brand" href="/">
+          <span class="brand-mark accent"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+          <span class="brand-name">Clearpath</span>
+        </a>
+        <h1><%= isClient ? "Sign in to your portal" : "Agency sign in" %></h1>
+        <p>
+          <%= isClient
+            ? `Use the email ${siteName} invited to your ${brand && brand.portal_name ? brand.portal_name.toLowerCase() : "client portal"}.`
+            : `Workspace access for ${siteName}. Clients sign in through the portal instead.` %>
+        </p>
+
+        <% if (error) { %>
+          <div class="notice notice-error" style="margin-top:20px" role="alert">
+            <svg><use href="#i-alert"/></svg>
+            <div><%= error %></div>
+          </div>
+        <% } %>
+
+        <form method="post" action="<%= isClient ? '/portal/login' : '/login' %>" autocomplete="on">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <input type="hidden" name="next" value="<%= next %>">
+          <div class="field">
+            <label for="email">Email</label>
+            <input class="input" id="email" name="email" type="email" inputmode="email" autocomplete="username"
+                   value="<%= email %>" placeholder="you@agency.com" required autofocus>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div style="position:relative">
+              <input class="input" id="password" name="password" type="password" autocomplete="current-password"
+                     placeholder="Your password" required style="padding-right:64px">
+              <button class="btn btn-ghost btn-sm" type="button" data-reveal="password"
+                      aria-pressed="false"
+                      style="position:absolute;right:4px;top:4px;min-height:32px">Show</button>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-block btn-lg" type="submit" data-busy-label="Signing in…">Sign in</button>
+        </form>
+
+        <div class="auth-links">
+          <% if (isClient) { %>
+            <a href="/login">Agency sign in</a>
+            <a href="/#contact">Need portal access?</a>
+          <% } else { %>
+            <a href="/portal/login">Client portal</a>
+            <a href="/#contact">Get a workspace</a>
+          <% } %>
+        </div>
+
+        <% if (demoMode) { %>
+          <div class="demo-creds">
+            <strong>Demo accounts · seeded database</strong>
+            <% if (isClient) { %>
+              <div class="row"><span>Client</span><code>amara@example.com</code></div>
+              <div class="row"><span>Password</span><code>Client!2026</code></div>
+            <% } else { %>
+              <div class="row"><span>Owner</span><code>dana@denovocredit.com · Denovo!2026</code></div>
+              <div class="row"><span>Specialist</span><code>marcus@denovocredit.com · Specialist!2026</code></div>
+            <% } %>
+            <p class="tiny muted" style="margin-top:8px">Set <code>SEED_DEMO=0</code> in production to hide these.</p>
+          </div>
+        <% } %>
+      </div>
+    </main>
+  </div>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>

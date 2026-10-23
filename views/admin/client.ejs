@@ -1,0 +1,509 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/app-head", { title }) %>
+
+<%
+  const openDisputes = disputes.filter((d) => !["Deleted", "Closed"].includes(d.status));
+  const pendingReqs = requests.filter((r) => !r.done);
+  const verifiedDocs = documents.filter((d) => d.status === "Verified").length;
+%>
+
+<div class="page-head">
+  <div class="detail-title">
+    <span class="avatar lg"><%= initials(client.name) %></span>
+    <div>
+      <h1><%= client.name %></h1>
+      <div class="meta">
+        <span class="mono"><%= client.ref %></span> ·
+        <a href="mailto:<%= client.email %>"><%= client.email %></a>
+        <%= client.phone ? ` · ${client.phone}` : "" %>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <span class="badge <%= statusClass(client.stage) %>"><%= client.stage %></span>
+        <span class="badge <%= client.portal_status === "Active" ? "teal" : "gray" %>">Portal <%= client.portal_status.toLowerCase() %></span>
+        <span class="badge violet"><%= openDisputes.length %> open</span>
+        <% if (pendingReqs.length) { %><span class="badge amber"><%= pendingReqs.length %> doc request<%= pendingReqs.length === 1 ? "" : "s" %></span><% } %>
+      </div>
+    </div>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/clients">All clients</a>
+    <% if (!portalUser && user.role === "owner") { %>
+      <form method="post" action="/app/clients/<%= client.id %>/invite"
+            data-confirm="Create a portal account for <%= client.name %>? A temporary password will be shown once.">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <button class="btn" type="submit">Invite to portal</button>
+      </form>
+    <% } %>
+    <button class="btn btn-primary" type="button" data-open="new-dispute"><svg><use href="#i-plus"/></svg> New dispute</button>
+  </div>
+</div>
+
+<% if (invite) { %>
+  <div class="notice notice-ok" role="status">
+    <svg><use href="#i-lock"/></svg>
+    <div class="grow">
+      <strong>Portal access created.</strong> Share this temporary password with <%= client.name %> — it is shown once and cannot be retrieved later.
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+        <span class="chip mono"><%= invite.email %></span>
+        <span class="chip mono" id="invite-pass"><%= invite.password %></span>
+        <button class="btn btn-sm" type="button" data-copy="<%= invite.password %>">Copy password</button>
+      </div>
+    </div>
+  </div>
+<% } %>
+
+<div class="score-row">
+  <div class="score-box">
+    <div class="b">TransUnion</div>
+    <div class="v"><%= client.tu %></div>
+    <div class="d"><%= client.delta >= 0 ? "+" : "" %><%= client.delta %> since intake</div>
+  </div>
+  <div class="score-box">
+    <div class="b">Experian</div>
+    <div class="v"><%= client.ex %></div>
+    <div class="d"><%= client.utilization %>% utilization</div>
+  </div>
+  <div class="score-box">
+    <div class="b">Equifax</div>
+    <div class="v"><%= client.eq %></div>
+    <div class="d"><%= verifiedDocs %>/<%= Math.max(documents.length, client.docs_total) %> documents verified</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="tabs" data-tabs role="tablist" aria-label="Client sections">
+    <% [["overview","Overview"],["tradelines","Tradelines (" + tradelines.length + ")"],["disputes","Disputes (" + disputes.length + ")"],["documents","Documents (" + documents.length + ")"],["messages","Messages (" + messages.length + ")"]].forEach(([key, label], i) => { %>
+      <button class="tab <%= i === 0 ? "is-active" : "" %>" type="button" role="tab" data-tab="<%= key %>"
+              aria-selected="<%= i === 0 ? "true" : "false" %>" aria-controls="panel-<%= key %>"><%= label %></button>
+    <% }) %>
+  </div>
+
+  <div class="tab-panel" id="panel-overview" data-panel="overview" role="tabpanel">
+    <div class="dash-grid">
+      <div class="stack">
+        <div>
+          <h3 style="font-size:14px;margin-bottom:10px">Case notes</h3>
+          <form method="post" action="/app/clients/<%= client.id %>/notes" class="stack" style="gap:10px">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <textarea class="textarea" name="notes" rows="4" maxlength="2000" placeholder="What the next round depends on…"><%= client.notes || "" %></textarea>
+            <div class="form-actions">
+              <button class="btn btn-sm btn-primary" type="submit">Save notes</button>
+              <span class="tiny muted">Visible to staff only.</span>
+            </div>
+          </form>
+        </div>
+
+        <div>
+          <div class="row-between" style="margin-bottom:10px">
+            <h3 style="font-size:14px">Document requests</h3>
+            <button class="btn btn-sm" type="button" data-open="new-request">Request a document</button>
+          </div>
+          <% if (!requests.length) { %>
+            <p class="small muted">No open requests. The client portal shows nothing pending.</p>
+          <% } else { %>
+            <div class="list-rows" style="border:1px solid var(--line);border-radius:12px;overflow:hidden">
+              <% requests.forEach((r) => { %>
+                <div class="list-row">
+                  <% if (r.done) { %>
+                    <svg style="width:16px;height:16px;color:var(--teal)"><use href="#i-check"/></svg>
+                  <% } else { %>
+                    <svg style="width:16px;height:16px;color:var(--amber)"><use href="#i-alert"/></svg>
+                  <% } %>
+                  <div class="grow">
+                    <div class="title"><%= r.label %></div>
+                    <div class="meta"><%= r.type %><%= r.due ? ` · due ${r.due}` : "" %><%= r.done ? " · received" : "" %></div>
+                  </div>
+                  <span class="badge <%= r.done ? "teal" : "amber" %>"><%= r.done ? "Done" : "Open" %></span>
+                </div>
+              <% }) %>
+            </div>
+          <% } %>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card card-pad" style="box-shadow:none">
+          <h3 style="font-size:14px;margin-bottom:12px">Snapshot</h3>
+          <dl class="def-list">
+            <div><dt>Client since</dt><dd><%= client.joined %></dd></div>
+            <div><dt>Stage</dt><dd><%= client.stage %></dd></div>
+            <div><dt>Portal</dt><dd><%= portalUser ? `Active · ${portalUser.email}` : "Invitation not sent" %></dd></div>
+            <div><dt>Utilization</dt><dd><%= client.utilization %>%</dd></div>
+            <div><dt>Packages</dt><dd><%= packages.length %> mailed or in flight</dd></div>
+            <div><dt>Documents</dt><dd><%= verifiedDocs %> verified of <%= documents.length %></dd></div>
+          </dl>
+        </div>
+
+        <div class="card card-pad" style="box-shadow:none">
+          <h3 style="font-size:14px;margin-bottom:12px">Recent mail</h3>
+          <% if (!packages.length) { %>
+            <p class="small muted">Nothing mailed yet.</p>
+          <% } else { %>
+            <div class="stack" style="gap:10px">
+              <% packages.slice(0, 4).forEach((p) => { %>
+                <div class="row-between" style="font-size:13px">
+                  <div>
+                    <div style="font-weight:560"><%= p.ref %> · <%= bureau[p.bureau] ? bureau[p.bureau].name : p.bureau %></div>
+                    <div class="tiny muted"><%= p.method %><%= p.tracking ? ` · ${p.tracking}` : "" %></div>
+                  </div>
+                  <span class="badge <%= statusClass(p.status) %>"><%= p.status %></span>
+                </div>
+              <% }) %>
+            </div>
+          <% } %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel" id="panel-tradelines" data-panel="tradelines" role="tabpanel" hidden>
+    <div class="row-between" style="margin-bottom:14px">
+      <div>
+        <h3 style="font-size:14px">Tradelines on file</h3>
+        <p class="tiny muted" style="margin-top:3px">Each item keeps its own evidence list and strength score.</p>
+      </div>
+      <button class="btn btn-sm" type="button" data-open="new-tradeline"><svg><use href="#i-plus"/></svg> Add tradeline</button>
+    </div>
+    <% if (!tradelines.length) { %>
+      <div class="empty">
+        <h3>No tradelines yet</h3>
+        <p>Add the accounts you intend to dispute, with the reason and the evidence that supports it.</p>
+      </div>
+    <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Creditor</th><th>Bureau</th><th>Type</th><th>Balance</th><th>Reason</th><th>Strength</th><th></th></tr></thead>
+          <tbody>
+            <% tradelines.forEach((t) => { %>
+              <tr>
+                <td><strong><%= t.creditor %></strong> <span class="mono muted">••<%= t.mask %></span></td>
+                <td><%= bureau[t.bureau] ? bureau[t.bureau].name : t.bureau %></td>
+                <td><%= t.type %></td>
+                <td class="num"><%= money(t.balance) %></td>
+                <td class="small"><span class="truncate" style="display:inline-block;max-width:260px" title="<%= t.reason %>"><%= t.reason %></span></td>
+                <td><span class="badge <%= t.strength >= 85 ? "teal" : t.strength >= 70 ? "amber" : "rose" %>"><%= t.strength %>%</span></td>
+                <td class="actions">
+                  <form method="post" action="/app/disputes">
+                    <input type="hidden" name="_csrf" value="<%= csrf %>">
+                    <input type="hidden" name="client_id" value="<%= client.id %>">
+                    <input type="hidden" name="tradeline_id" value="<%= t.id %>">
+                    <button class="btn btn-sm" type="submit">Draft dispute</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="tab-panel" id="panel-disputes" data-panel="disputes" role="tabpanel" hidden>
+    <% if (!disputes.length) { %>
+      <div class="empty">
+        <h3>No disputes yet</h3>
+        <p>Choose a tradeline and draft the first round. Nothing is mailed until you approve the letter.</p>
+        <button class="btn btn-primary btn-sm" type="button" data-open="new-dispute" style="margin-top:14px">New dispute</button>
+      </div>
+    <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Reference</th><th>Bureau</th><th>Account</th><th>Issue</th><th>Round</th><th>Status</th><th>Mailed</th><th>Due</th><th></th></tr></thead>
+          <tbody>
+            <% disputes.forEach((d) => { %>
+              <tr>
+                <td class="mono"><a class="link" href="/app/disputes/<%= d.id %>"><%= d.ref %></a></td>
+                <td><%= bureau[d.bureau] ? bureau[d.bureau].short : d.bureau %></td>
+                <td class="small"><%= d.account %></td>
+                <td class="small muted"><span class="truncate" style="display:inline-block;max-width:200px"><%= d.issue %></span></td>
+                <td class="num"><%= d.round %></td>
+                <td><span class="badge <%= statusClass(d.status) %>"><%= d.status %></span></td>
+                <td class="nowrap muted"><%= d.mailed || "—" %></td>
+                <td class="nowrap muted"><%= d.due || "—" %></td>
+                <td class="actions">
+                  <a class="btn btn-sm" href="/app/disputes/<%= d.id %>">Open</a>
+                  <a class="btn btn-sm" href="/app/disputes/<%= d.id %>/letter.pdf" title="Download letter PDF">PDF</a>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="tab-panel" id="panel-documents" data-panel="documents" role="tabpanel" hidden>
+    <div class="row-between" style="margin-bottom:14px">
+      <div>
+        <h3 style="font-size:14px">Evidence vault</h3>
+        <p class="tiny muted" style="margin-top:3px">Hashed on upload; attached to this client only.</p>
+      </div>
+      <button class="btn btn-sm" type="button" data-open="upload-doc"><svg><use href="#i-upload"/></svg> Upload</button>
+    </div>
+    <% if (!documents.length) { %>
+      <div class="empty"><h3>No documents</h3><p>Request an ID or upload evidence to support a dispute.</p></div>
+    <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Size</th><th>SHA-256</th><th>Uploaded</th><th></th></tr></thead>
+          <tbody>
+            <% documents.forEach((doc) => { %>
+              <tr>
+                <td class="small"><strong><%= doc.name %></strong></td>
+                <td class="small"><%= doc.type %></td>
+                <td><span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span></td>
+                <td class="small muted nowrap"><%= doc.size || "—" %></td>
+                <td class="mono muted"><%= String(doc.sha256).slice(0, 12) %>…</td>
+                <td class="nowrap muted small"><%= fmtDate(doc.uploaded_at) %> · <%= doc.uploaded_by %></td>
+                <td class="actions">
+                  <% if (doc.status !== "Verified") { %>
+                    <form method="post" action="/app/documents/<%= doc.id %>/verify" style="display:inline">
+                      <input type="hidden" name="_csrf" value="<%= csrf %>">
+                      <button class="btn btn-sm" type="submit">Verify</button>
+                    </form>
+                  <% } %>
+                  <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+
+  <div class="tab-panel" id="panel-messages" data-panel="messages" role="tabpanel" hidden>
+    <div class="grid-portal">
+      <div>
+        <h3 style="font-size:14px;margin-bottom:12px">Conversation</h3>
+        <div class="message-thread">
+          <% if (!messages.length) { %><p class="small muted">No messages yet. Anything you send appears in the client portal.</p><% } %>
+          <% messages.forEach((m) => { %>
+            <div class="msg <%= m.author_role %>">
+              <div class="who"><%= m.author_name %> · <%= fmtDateTime(m.created_at) %></div>
+              <%= m.body %>
+            </div>
+          <% }) %>
+        </div>
+        <form method="post" action="/app/clients/<%= client.id %>/message" class="stack" style="margin-top:16px;gap:10px">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <textarea class="textarea" name="body" rows="3" maxlength="2000" required placeholder="Write to <%= client.name.split(' ')[0] %>…"></textarea>
+          <div class="form-actions">
+            <button class="btn btn-primary btn-sm" type="submit">Send to portal</button>
+            <span class="tiny muted">The message is logged in the audit trail.</span>
+          </div>
+        </form>
+      </div>
+      <aside class="card card-pad" style="box-shadow:none">
+        <h3 style="font-size:14px;margin-bottom:10px">Portal contact</h3>
+        <% if (portalUser) { %>
+          <p class="small"><%= portalUser.email %></p>
+          <p class="tiny muted" style="margin-top:4px">Role: <%= portalUser.role %> · account active</p>
+          <p class="tiny muted" style="margin-top:12px">If they lose access, reset the password from the database or create a new invitation after removing the old account.</p>
+        <% } else { %>
+          <p class="small muted">No portal account yet.</p>
+          <% if (user.role === "owner") { %>
+            <form method="post" action="/app/clients/<%= client.id %>/invite" style="margin-top:12px">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <button class="btn btn-sm btn-primary" type="submit">Invite to portal</button>
+            </form>
+          <% } else { %>
+            <p class="tiny muted" style="margin-top:10px">Only an owner can send the invitation.</p>
+          <% } %>
+        <% } %>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<!-- new dispute -->
+<dialog class="modal" id="new-dispute" aria-labelledby="nd-title">
+  <form method="post" action="/app/disputes">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <input type="hidden" name="client_id" value="<%= client.id %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="nd-title">New dispute</h2>
+        <p>Drafting creates the case; the letter is generated when you open it.</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="nd-tradeline">Tradeline</label>
+        <select class="select" id="nd-tradeline" name="tradeline_id">
+          <option value="">— No tradeline (enter the account manually) —</option>
+          <% tradelines.forEach((t) => { %>
+            <option value="<%= t.id %>"><%= t.creditor %> ••<%= t.mask %> · <%= bureau[t.bureau] ? bureau[t.bureau].name : t.bureau %> · <%= t.type %></option>
+          <% }) %>
+        </select>
+        <span class="hint">Choosing a tradeline fills the bureau, account and reason from the file.</span>
+      </div>
+      <div class="form-grid">
+        <div class="field">
+          <label for="nd-bureau">Bureau</label>
+          <select class="select" id="nd-bureau" name="bureau">
+            <option value="tu">TransUnion</option><option value="ex">Experian</option><option value="eq">Equifax</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="nd-round">Round</label>
+          <select class="select" id="nd-round" name="round">
+            <option>1</option><option>2</option><option>3</option>
+          </select>
+        </div>
+        <div class="field span-2">
+          <label for="nd-account">Account</label>
+          <input class="input" id="nd-account" name="account" maxlength="120" placeholder="Creditor ••1234">
+        </div>
+        <div class="field span-2">
+          <label for="nd-issue">Dispute reason</label>
+          <input class="input" id="nd-issue" name="issue" maxlength="160" placeholder="Account does not belong to this consumer">
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit">Create dispute</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- new tradeline -->
+<dialog class="modal" id="new-tradeline" aria-labelledby="nt-title">
+  <form method="post" action="/app/clients/<%= client.id %>/tradelines">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="nt-title">Add tradeline</h2>
+        <p>One item, one bureau. Duplicate the entry for each bureau that reports it.</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field">
+          <label for="nt-creditor">Creditor</label>
+          <input class="input" id="nt-creditor" name="creditor" required maxlength="80" placeholder="Jefferson Capital">
+        </div>
+        <div class="field">
+          <label for="nt-mask">Account (last 4)</label>
+          <input class="input" id="nt-mask" name="mask" maxlength="8" placeholder="4821">
+        </div>
+        <div class="field">
+          <label for="nt-bureau">Bureau</label>
+          <select class="select" id="nt-bureau" name="bureau">
+            <option value="tu">TransUnion</option><option value="ex">Experian</option><option value="eq">Equifax</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="nt-type">Type</label>
+          <select class="select" id="nt-type" name="type">
+            <option>Collection</option><option>Late payment</option><option>Charge-off</option>
+            <option>Hard inquiry</option><option>Repossession</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="nt-balance">Balance</label>
+          <input class="input" id="nt-balance" name="balance" type="number" min="0" step="1" value="0">
+        </div>
+        <div class="field">
+          <label for="nt-opened">Opened</label>
+          <input class="input" id="nt-opened" name="opened" maxlength="20" placeholder="Mar 2024">
+        </div>
+        <div class="field span-2">
+          <label for="nt-reason">Dispute theory</label>
+          <input class="input" id="nt-reason" name="reason" required maxlength="160" placeholder="Account does not belong to this consumer">
+        </div>
+        <div class="field span-2">
+          <label for="nt-evidence">Evidence (one per line)</label>
+          <textarea class="textarea" id="nt-evidence" name="evidence" rows="3" placeholder="Identity theft affidavit&#10;Police report"></textarea>
+        </div>
+        <div class="field span-2">
+          <label for="nt-strength">Evidence strength — <span data-range-out="nt-strength">75</span>%</label>
+          <input type="range" class="range" id="nt-strength" name="strength" min="40" max="99" value="75"
+                 data-range-target="nt-strength" style="width:100%;accent-color:var(--accent)">
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit">Add tradeline</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- doc request -->
+<dialog class="modal" id="new-request" aria-labelledby="nr-title">
+  <form method="post" action="/app/clients/<%= client.id %>/request">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="nr-title">Request a document</h2>
+        <p>Appears immediately in the client portal with a due date.</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label for="nr-label">What do you need?</label>
+          <input class="input" id="nr-label" name="label" required maxlength="80" placeholder="Police report — case page">
+        </div>
+        <div class="field">
+          <label for="nr-type">Type</label>
+          <select class="select" id="nr-type" name="type">
+            <option>Identity</option><option>Evidence</option><option>Bureau response</option><option>Agreement</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="nr-due">Due</label>
+          <input class="input" id="nr-due" name="due" maxlength="20" placeholder="Nov 4">
+        </div>
+        <div class="field span-2">
+          <label for="nr-note">Note for the client</label>
+          <textarea class="textarea" id="nr-note" name="note" rows="2" maxlength="300" placeholder="The notarized copy for the Portfolio Recovery item."></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit">Send request</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- upload -->
+<dialog class="modal" id="upload-doc" aria-labelledby="ud-title">
+  <form method="post" action="/app/documents" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <input type="hidden" name="client_id" value="<%= client.id %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="ud-title">Upload a document</h2>
+        <p>PDF, PNG, JPEG or HEIC · 10 MB maximum</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="dropzone">
+        <svg style="width:22px;height:22px;color:var(--ink-3)"><use href="#i-upload"/></svg>
+        <div style="margin-top:6px" id="ud-name">No file selected</div>
+        <input type="file" name="file" accept=".pdf,.png,.jpg,.jpeg,.heic,.heif" required data-file-input="#ud-name" aria-label="Document file">
+      </div>
+      <div class="field">
+        <label for="ud-type">Type</label>
+        <select class="select" id="ud-type" name="type">
+          <option>Evidence</option><option>Identity</option><option>Bureau response</option><option>Agreement</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit">Upload</button>
+    </div>
+  </form>
+</dialog>
+
+<%- include("../partials/app-foot") %>

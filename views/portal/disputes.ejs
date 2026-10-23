@@ -1,0 +1,84 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Disputes</h1>
+    <p><%= open.length %> open · <%= disputes.length - open.length %> closed or removed</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/portal">Back to your file</a>
+  </div>
+</div>
+
+<div class="notice notice-info">
+  <svg><use href="#i-clock"/></svg>
+  <div>
+    After a dispute is mailed, the bureau has <strong>30 days</strong> from receipt to respond. We track that
+    deadline on every item and post the outcome here as soon as it arrives.
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <div><h2>Open disputes</h2><p>Grouped by the bureau that has to answer</p></div>
+  </div>
+  <% if (!open.length) { %>
+    <div class="empty">
+      <h3>Nothing open right now</h3>
+      <p>When your specialist prepares the next round, it appears here with the account, the reason and the deadline.</p>
+    </div>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Account</th><th>Bureau</th><th>Reason</th><th>Round</th><th>Mailed</th><th>Response due</th><th>Status</th></tr></thead>
+        <tbody>
+          <% open.forEach((d) => { %>
+            <tr>
+              <td><strong><%= d.account %></strong><div class="tiny muted mono"><%= d.ref %></div></td>
+              <td><%= bureau[d.bureau] ? bureau[d.bureau].name : d.bureau %></td>
+              <td class="small"><%= d.issue %></td>
+              <td class="num"><%= d.round %></td>
+              <td class="nowrap muted"><%= d.mailed || "Preparing" %></td>
+              <td class="nowrap"><%= d.due || "—" %></td>
+              <td><span class="badge <%= statusClass(d.status) %>"><%= d.status %></span></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+  <div class="card-foot">
+    <p class="tiny muted">
+      Statuses: <strong>Needs review</strong> — drafted, not yet mailed. <strong>Queued</strong> — approved and
+      packaged. <strong>Mailed</strong> — certified and on its way. <strong>Awaiting response</strong> — delivered,
+      inside the 30-day window. <strong>Escalated</strong> — a regulator or attorney is involved.
+    </p>
+  </div>
+</section>
+
+<% const closed = disputes.filter((d) => ["Deleted", "Closed"].includes(d.status)); %>
+<section class="card">
+  <div class="card-head">
+    <div><h2>Closed items</h2><p>Removed, corrected or withdrawn</p></div>
+  </div>
+  <% if (!closed.length) { %>
+    <div class="empty"><p>No closed disputes yet.</p></div>
+  <% } else { %>
+    <div class="list-rows">
+      <% closed.forEach((d) => { %>
+        <div class="list-row">
+          <svg style="width:16px;height:16px;color:var(--teal)"><use href="#i-check"/></svg>
+          <div class="grow">
+            <div class="title"><%= d.account %></div>
+            <div class="meta"><%= bureau[d.bureau] ? bureau[d.bureau].name : d.bureau %> · <%= d.issue %> · round <%= d.round %></div>
+          </div>
+          <span class="badge <%= statusClass(d.status) %>"><%= d.status %></span>
+        </div>
+      <% }) %>
+    </div>
+  <% } %>
+</section>
+
+<%- include("../partials/portal-foot") %>

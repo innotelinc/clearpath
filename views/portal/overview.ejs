@@ -1,0 +1,166 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<section class="portal-hero">
+  <div>
+    <span class="eyebrow" style="color:#9db4d6">Your file · <%= client.ref %></span>
+    <h1 style="margin-top:10px">Hi <%= client.name.split(" ")[0] %>,</h1>
+    <p><%= tenant && tenant.welcome ? tenant.welcome : "Track every dispute, upload what we need, and see exactly what changed on your file." %></p>
+    <p class="small" style="color:#93a5c0;margin-top:12px">
+      <% if (due.length) { %>
+        <%= due.length %> item<%= due.length === 1 ? "" : "s" %> waiting on you · <%= open.length %> disputes open
+      <% } else { %>
+        Nothing is waiting on you · <%= open.length %> disputes in progress
+      <% } %>
+    </p>
+  </div>
+  <div class="portal-score">
+    <div><div class="b">TransUnion</div><div class="v"><%= client.tu %></div><div class="d">+<%= Math.max(0, client.delta) %> since intake</div></div>
+    <div><div class="b">Experian</div><div class="v"><%= client.ex %></div><div class="d"><%= client.utilization %>% util</div></div>
+    <div><div class="b">Equifax</div><div class="v"><%= client.eq %></div><div class="d"><%= verified %> docs verified</div></div>
+  </div>
+</section>
+
+<div class="grid-portal">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Disputes in progress</h2><p>What we sent, to which bureau, and when</p></div>
+        <a class="btn btn-sm" href="/portal/disputes">All disputes</a>
+      </div>
+      <% if (!open.length) { %>
+        <div class="empty">
+          <h3>No open disputes</h3>
+          <p>Your file is up to date. Your specialist will add the next round if anything needs attention.</p>
+        </div>
+      <% } else { %>
+        <div class="list-rows">
+          <% open.slice(0, 5).forEach((d) => { %>
+            <div class="list-row">
+              <span class="avatar"><%= d.bureau === "tu" ? "TU" : d.bureau === "ex" ? "EX" : "EQ" %></span>
+              <div class="grow">
+                <div class="title"><%= d.account %></div>
+                <div class="meta"><%= d.issue %> · round <%= d.round %></div>
+              </div>
+              <div class="right">
+                <span class="badge <%= statusClass(d.status) %>"><%= d.status %></span>
+                <div class="tiny muted" style="margin-top:3px"><%= d.due ? `Due ${d.due}` : d.mailed ? `Mailed ${d.mailed}` : "Being prepared" %></div>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Mail history</h2><p>Certified packages we sent on your behalf</p></div>
+      </div>
+      <% if (!packages.length) { %>
+        <div class="empty"><p>Nothing has been mailed yet. Disputes are prepared first, then sent certified.</p></div>
+      <% } else { %>
+        <div class="list-rows">
+          <% packages.slice(0, 4).forEach((p) => { %>
+            <div class="list-row">
+              <svg style="width:17px;height:17px;color:var(--ink-3)"><use href="#i-mail"/></svg>
+              <div class="grow">
+                <div class="title"><%= p.ref %> · <%= bureau[p.bureau] ? bureau[p.bureau].name : p.bureau %></div>
+                <div class="meta"><%= p.method %><%= p.tracking ? ` · ${p.tracking}` : "" %></div>
+              </div>
+              <span class="badge <%= statusClass(p.status) %>"><%= p.status %></span>
+            </div>
+          <% }) %>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Recent messages</h2><p>With your specialist</p></div>
+        <a class="btn btn-sm" href="/portal/messages">Open thread</a>
+      </div>
+      <div class="card-body">
+        <% if (!messages.length) { %>
+          <p class="small muted">No messages yet. Send the first one from the messages tab.</p>
+        <% } else { %>
+          <div class="message-thread" style="max-height:260px">
+            <% messages.slice(-3).forEach((m) => { %>
+              <div class="msg <%= m.author_role %>">
+                <div class="who"><%= m.author_name %> · <%= fmtDateTime(m.created_at) %></div>
+                <%= m.body %>
+              </div>
+            <% }) %>
+          </div>
+        <% } %>
+      </div>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>We need from you</h2><p>One file, one tap</p></div>
+        <span class="badge <%= due.length ? "amber" : "teal" %>"><%= due.length ? `${due.length} open` : "All clear" %></span>
+      </div>
+      <div class="card-body stack" style="gap:16px">
+        <% if (!due.length) { %>
+          <p class="small muted">Nothing outstanding. We will message you here if that changes.</p>
+        <% } else { %>
+          <% due.forEach((r) => { %>
+            <form method="post" action="/portal/documents" enctype="multipart/form-data" class="stack" style="gap:8px;padding-bottom:14px;border-bottom:1px solid var(--line)">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <input type="hidden" name="request_id" value="<%= r.id %>">
+              <input type="hidden" name="type" value="<%= r.type %>">
+              <div>
+                <div style="font-weight:560;font-size:13.5px"><%= r.label %></div>
+                <div class="tiny muted"><%= r.type %><%= r.due ? ` · due ${r.due}` : "" %><%= r.note ? ` · ${r.note}` : "" %></div>
+              </div>
+              <input class="input" type="file" name="file" required accept=".pdf,.png,.jpg,.jpeg,.heic,.heif"
+                     aria-label="File for <%= r.label %>" style="font-size:12.5px;padding:7px 10px">
+              <button class="btn btn-primary btn-sm" type="submit" data-busy-label="Uploading…">Upload</button>
+            </form>
+          <% }) %>
+        <% } %>
+        <p class="tiny muted">PDF, PNG, JPEG or HEIC · up to 10 MB · every upload is hashed and attached to your file.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Your documents</h2><p><%= verified %> verified</p></div>
+        <a class="btn btn-sm" href="/portal/documents">Vault</a>
+      </div>
+      <div class="list-rows">
+        <% if (!documents.length) { %>
+          <div class="empty"><p>No documents yet.</p></div>
+        <% } else { %>
+          <% documents.slice(0, 4).forEach((doc) => { %>
+            <div class="list-row">
+              <svg style="width:16px;height:16px;color:var(--ink-3)"><use href="#i-file"/></svg>
+              <div class="grow">
+                <div class="title truncate"><%= doc.name %></div>
+                <div class="meta"><%= doc.type %> · <%= fmtDate(doc.uploaded_at) %></div>
+              </div>
+              <span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span>
+            </div>
+          <% }) %>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:8px">Your specialist</h3>
+      <p class="small muted">
+        <%= tenant && tenant.brand_name ? tenant.brand_name : "Denovo Credit" %> handles your file. Questions about a
+        dispute, a deadline or a document go in the message thread — that keeps everything with your case.
+      </p>
+      <div class="row" style="margin-top:14px">
+        <a class="btn btn-sm" href="/portal/messages">Message us</a>
+        <a class="btn btn-sm btn-ghost" href="mailto:<%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %>">Email</a>
+      </div>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/portal-foot") %>

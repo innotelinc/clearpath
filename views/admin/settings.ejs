@@ -1,0 +1,180 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p>Branding, team access and your account</p>
+  </div>
+  <div class="page-actions">
+    <span class="chip mono">workspace · <%= tenant.slug %></span>
+  </div>
+</div>
+
+<% if (invited) { %>
+  <div class="notice notice-ok" role="status">
+    <svg><use href="#i-lock"/></svg>
+    <div class="grow">
+      <strong><%= invited.name %> can now sign in.</strong> Send this temporary password over a channel you trust — it is shown once.
+      <div class="row" style="margin-top:8px;gap:8px;flex-wrap:wrap">
+        <span class="chip mono"><%= invited.email %></span>
+        <span class="chip mono"><%= invited.password %></span>
+        <button class="btn btn-sm" type="button" data-copy="<%= invited.password %>">Copy password</button>
+      </div>
+    </div>
+  </div>
+<% } %>
+
+<div class="dash-grid">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Branding</h2><p>Applies to the workspace, the client portal and generated PDFs</p></div>
+        <% if (user.role !== "owner") { %><span class="badge gray">Owner only</span><% } %>
+      </div>
+      <form class="card-body stack" method="post" action="/app/settings/branding">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="form-grid">
+          <div class="field">
+            <label for="b-name">Workspace name</label>
+            <input class="input" id="b-name" name="name" value="<%= tenant.name %>" required maxlength="80" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-brand">Brand name on the portal</label>
+            <input class="input" id="b-brand" name="brand_name" value="<%= tenant.brand_name %>" maxlength="80" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-logo">Monogram</label>
+            <input class="input" id="b-logo" name="logo" value="<%= tenant.logo || "" %>" maxlength="3" style="text-transform:uppercase" <%= user.role !== "owner" ? "disabled" : "" %>>
+            <span class="hint">Two or three letters, shown in the mark.</span>
+          </div>
+          <div class="field">
+            <label for="b-accent">Accent colour</label>
+            <input class="input" id="b-accent" name="accent" type="color" value="<%= tenant.accent %>" style="height:40px;padding:4px" <%= user.role !== "owner" ? "disabled" : "" %>>
+            <span class="hint">Buttons, links and highlights.</span>
+          </div>
+          <div class="field span-2">
+            <label for="b-tagline">Tagline</label>
+            <input class="input" id="b-tagline" name="tagline" value="<%= tenant.tagline || "" %>" maxlength="120" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-email">Support email</label>
+            <input class="input" id="b-email" name="support_email" type="email" value="<%= tenant.support_email || "" %>" maxlength="120" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-phone">Support phone</label>
+            <input class="input" id="b-phone" name="support_phone" value="<%= tenant.support_phone || "" %>" maxlength="40" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field span-2">
+            <label for="b-address">Mailing address</label>
+            <input class="input" id="b-address" name="address" value="<%= tenant.address || "" %>" maxlength="160" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-portal">Portal name</label>
+            <input class="input" id="b-portal" name="portal_name" value="<%= tenant.portal_name %>" maxlength="40" <%= user.role !== "owner" ? "disabled" : "" %>>
+          </div>
+          <div class="field">
+            <label for="b-domain">Portal domain</label>
+            <input class="input" id="b-domain" name="domain" value="<%= tenant.domain || "" %>" maxlength="120" <%= user.role !== "owner" ? "disabled" : "" %>>
+            <span class="hint">Requests on this host resolve to this workspace.</span>
+          </div>
+          <div class="field span-2">
+            <label for="b-welcome">Portal welcome message</label>
+            <textarea class="textarea" id="b-welcome" name="welcome" rows="2" maxlength="300" <%= user.role !== "owner" ? "disabled" : "" %>><%= tenant.welcome || "" %></textarea>
+          </div>
+        </div>
+        <% if (user.role === "owner") { %>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save branding</button>
+            <a class="btn btn-ghost" href="/portal/login" target="_blank" rel="noopener">Preview portal</a>
+          </div>
+        <% } else { %>
+          <p class="tiny muted">Only an agency owner can change branding.</p>
+        <% } %>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Your password</h2><p>At least 10 characters, letters and a number</p></div>
+      </div>
+      <form class="card-body stack" method="post" action="/app/settings/password">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="form-grid">
+          <div class="field span-2">
+            <label for="p-current">Current password</label>
+            <input class="input" id="p-current" name="current" type="password" autocomplete="current-password" required>
+          </div>
+          <div class="field span-2">
+            <label for="p-next">New password</label>
+            <input class="input" id="p-next" name="next" type="password" autocomplete="new-password" required minlength="10">
+          </div>
+        </div>
+        <button class="btn" type="submit" style="justify-self:start">Update password</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Team</h2><p><%= team.length %> account<%= team.length === 1 ? "" : "s" %> in this workspace</p></div>
+      </div>
+      <div class="list-rows">
+        <% team.forEach((member) => { %>
+          <div class="list-row">
+            <span class="avatar"><%= initials(member.name) %></span>
+            <div class="grow">
+              <div class="title"><%= member.name %><%= member.id === user.id ? " (you)" : "" %></div>
+              <div class="meta"><%= member.email %></div>
+            </div>
+            <span class="badge <%= member.role === "owner" ? "violet" : member.role === "specialist" ? "blue" : "teal" %>"><%= member.role %></span>
+          </div>
+        <% }) %>
+      </div>
+      <% if (user.role === "owner") { %>
+        <form class="card-body stack" method="post" action="/app/settings/team" style="border-top:1px solid var(--line)">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <strong class="small">Invite a teammate</strong>
+          <div class="form-grid">
+            <div class="field">
+              <label for="t-name">Name</label>
+              <input class="input" id="t-name" name="name" required maxlength="80" placeholder="Marcus Lee">
+            </div>
+            <div class="field">
+              <label for="t-email">Email</label>
+              <input class="input" id="t-email" name="email" type="email" required maxlength="120" placeholder="marcus@denovocredit.com">
+            </div>
+            <div class="field span-2">
+              <label for="t-role">Role</label>
+              <select class="select" id="t-role" name="role">
+                <option value="specialist">Specialist — cases, disputes, mailroom</option>
+                <option value="owner">Owner — full access including billing and branding</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" type="submit" style="justify-self:start">Create account</button>
+        </form>
+      <% } %>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><div><h2>Deployment</h2><p>What this instance is running</p></div></div>
+      <div class="card-body">
+        <dl class="def-list">
+          <div><dt>Workspace</dt><dd class="mono"><%= tenant.slug %></dd></div>
+          <div><dt>Domain</dt><dd><%= tenant.domain || "—" %></dd></div>
+          <div><dt>Portal</dt><dd><%= tenant.portal_name %></dd></div>
+          <div><dt>Demo data</dt><dd><%= demoMode ? "Seeded (turn off in production)" : "Disabled" %></dd></div>
+        </dl>
+        <hr style="margin:16px 0">
+        <p class="tiny muted">
+          Uploads and the SQLite database live under <code>DATA_DIR</code> on a persistent volume.
+          Back up that directory, terminate TLS in front of the app and set <code>COOKIE_SECURE=1</code>
+          before inviting real clients.
+        </p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/app-foot") %>

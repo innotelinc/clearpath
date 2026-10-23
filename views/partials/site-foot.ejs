@@ -1,0 +1,61 @@
+<%
+  const brand = tenant || hostTenant;
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+  const supportEmail = (brand && brand.support_email) || "hello@denovocredit.com";
+%>  </main>
+  <footer class="site-foot">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div>
+          <a class="brand" href="/">
+            <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+            <span class="brand-name"><%= siteName %></span>
+          </a>
+          <p class="small muted" style="margin-top:14px;max-width:34ch">
+            Clearpath is the credit repair operating system built and operated by Denovo Credit.
+          </p>
+          <p class="small" style="margin-top:14px">
+            <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a><br>
+            <span class="muted"><%= brand && brand.support_phone ? brand.support_phone : "(415) 555-0100" %></span>
+          </p>
+        </div>
+        <div>
+          <h4>Platform</h4>
+          <ul>
+            <li><a href="/#product">Product overview</a></li>
+            <li><a href="/#how">How it works</a></li>
+            <li><a href="/#pricing">Pricing</a></li>
+            <li><a href="/#security">Security</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Access</h4>
+          <ul>
+            <li><a href="/login">Agency sign in</a></li>
+            <li><a href="/portal/login">Client portal</a></li>
+            <li><a href="/#contact">Book a walkthrough</a></li>
+            <li><a href="/#faq">FAQ</a></li>
+          </ul>
+        </div>
+        <div>
+          <h4>Legal</h4>
+          <ul>
+            <li><a href="/legal/privacy">Privacy notice</a></li>
+            <li><a href="/legal/terms">Terms of use</a></li>
+            <li><a href="/robots.txt">Robots</a></li>
+            <li><a href="/healthz">Status</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="foot-note">
+        <p class="disclaimer">
+          Denovo Credit is a credit repair organization. Clearpath is the software we use to run it and licence to other agencies.
+          Results vary: no score change, deletion or timeline is guaranteed. Clearpath is not a law firm, a credit bureau or a lender.
+        </p>
+        <p>© <%= new Date().getFullYear() %> Denovo Credit · denovocredit.com</p>
+      </div>
+    </div>
+  </footer>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>

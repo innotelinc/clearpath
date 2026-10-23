@@ -1,0 +1,49 @@
+<%
+  const brand = tenant || hostTenant;
+  const siteName = brand ? brand.brand_name : "Denovo Credit";
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %></title>
+  <meta name="description" content="<%= typeof description !== 'undefined' ? description : 'Clearpath is the credit repair operating system from Denovo Credit: evidence-backed disputes, certified mailroom automation and a client portal that shows real progress.' %>">
+  <meta name="theme-color" content="#0b1424">
+  <meta name="robots" content="<%= typeof noindex !== 'undefined' && noindex ? 'noindex, nofollow' : 'index, follow' %>">
+  <meta property="og:title" content="<%= title %>">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Clearpath by Denovo Credit">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body class="site">
+  <a class="skip" href="#main">Skip to content</a>
+  <%- include("icons") %>
+  <header class="site-head">
+    <div class="wrap site-head-inner">
+      <a class="brand" href="/" aria-label="<%= siteName %> home">
+        <span class="brand-mark"><%= brand && brand.logo ? brand.logo : "DC" %></span>
+        <span>
+          <span class="brand-name"><%= siteName %></span>
+          <span class="brand-sub" style="display:block">Clearpath platform</span>
+        </span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/#product">Product</a>
+        <a href="/#how">How it works</a>
+        <a href="/#pricing">Pricing</a>
+        <a href="/#security">Security</a>
+        <a href="/#faq">FAQ</a>
+        <a href="/portal/login">Client sign in</a>
+      </nav>
+      <div class="site-actions">
+        <a class="btn btn-ghost btn-sm" href="/login">Agency sign in</a>
+        <a class="btn btn-primary btn-sm" href="/#contact">Book a walkthrough</a>
+        <button class="icon-btn site-toggle" type="button" data-toggle="site-nav" aria-expanded="false" aria-controls="site-nav" aria-label="Menu">
+          <svg><use href="#i-menu"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+  <main id="main">

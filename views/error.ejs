@@ -1,0 +1,28 @@
+<%
+  const brand = tenant || hostTenant;
+  const home = user && user.role === "client" ? "/portal" : user ? "/app" : "/";
+%><!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= title %> · Clearpath</title>
+  <meta name="robots" content="noindex, nofollow">
+  <style>:root{--accent:<%= brand && brand.accent ? brand.accent : '#1f5eff' %>;}</style>
+  <link rel="stylesheet" href="/assets/css/app.css">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+  <main class="error-page" id="main">
+    <div class="error-card">
+      <div class="code"><%= status %></div>
+      <h1><%= title %></h1>
+      <p><%= message %></p>
+      <div class="row">
+        <a class="btn btn-primary" href="<%= home %>"><%= user ? "Back to workspace" : "Back to denovocredit.com" %></a>
+        <% if (!user) { %><a class="btn" href="/login">Sign in</a><% } %>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

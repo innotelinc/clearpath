@@ -1,0 +1,96 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<%
+  const rows = [
+    { key: "tu", name: "TransUnion", score: client.tu, tone: "var(--blue)" },
+    { key: "ex", name: "Experian", score: client.ex, tone: "var(--violet)" },
+    { key: "eq", name: "Equifax", score: client.eq, tone: "var(--teal)" }
+  ];
+%>
+
+<div class="page-head">
+  <div>
+    <h1>Score history</h1>
+    <p>Source: the three bureau reports your specialist pulled · viewed <%= generated %></p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/portal">Back to your file</a>
+  </div>
+</div>
+
+<div class="kpis">
+  <% rows.forEach((r) => { %>
+    <div class="card kpi">
+      <div class="kpi-label"><%= r.name %></div>
+      <div class="kpi-value"><%= r.score %></div>
+      <div class="kpi-meta up">+<%= Math.max(0, client.delta) %> since intake</div>
+      <div style="height:6px;border-radius:999px;background:var(--paper-3);margin-top:10px;overflow:hidden">
+        <div style="height:100%;width:<%= Math.round((r.score / 850) * 100) %>%;background:<%= r.tone %>"></div>
+      </div>
+      <div class="row-between" style="margin-top:6px">
+        <span class="tiny muted">300</span>
+        <span class="tiny muted">850</span>
+      </div>
+    </div>
+  <% }) %>
+  <div class="card kpi">
+    <div class="kpi-label">Credit utilization</div>
+    <div class="kpi-value"><%= client.utilization %>%</div>
+    <div class="kpi-meta <%= client.utilization > 30 ? "warn" : "up" %>">
+      <%= client.utilization > 30 ? "Above the 30% guideline" : "Within the 30% guideline" %>
+    </div>
+  </div>
+</div>
+
+<div class="grid-portal">
+  <section class="card">
+    <div class="card-head">
+      <div><h2>Where the points are</h2><p>What each bureau is reporting today</p></div>
+    </div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Bureau</th><th>At intake</th><th>Now</th><th>Change</th><th>Trajectory</th></tr></thead>
+        <tbody>
+          <% rows.forEach((r) => { %>
+            <tr>
+              <td><strong><%= r.name %></strong></td>
+              <td class="num muted"><%= r.score - client.delta %></td>
+              <td class="num"><strong><%= r.score %></strong></td>
+              <td class="num" style="color:var(--teal)">+<%= Math.max(0, client.delta) %></td>
+              <td class="small muted"><%= client.delta >= 30 ? "Moving up" : client.delta > 0 ? "Improving" : "Holding steady" %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <div class="card-foot">
+      <p class="tiny muted">
+        Scores are the ones reported on the date of the last pull. They move for reasons outside a dispute —
+        balances, utilization and new accounts all count.
+      </p>
+    </div>
+  </section>
+
+  <aside class="stack">
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:10px">What moves a score</h3>
+      <ul class="checklist" style="margin-top:8px;gap:12px">
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>Utilization under 30%</strong>Paying balances down is usually the fastest lever.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>No new applications</strong>Each hard inquiry costs a few points.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>On-time payments</strong>The single biggest factor in most models.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>Removed collections</strong>Deletions help once the bureau confirms them.</span></li>
+      </ul>
+    </section>
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:8px">A note on timing</h3>
+      <p class="small muted">
+        Bureaus update on their own schedule — usually once a month per furnisher. A letter being mailed is not
+        the same as a bureau changing your file. We post the change here when it actually lands.
+      </p>
+    </section>
+  </aside>
+</div>
+
+<%- include("../partials/portal-foot") %>

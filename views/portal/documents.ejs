@@ -1,0 +1,121 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Documents</h1>
+    <p><%= documents.length %> on your file · <%= verified %> verified · <%= openRequests.length %> requested</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-primary" href="#upload"><svg><use href="#i-upload"/></svg> Upload a document</a>
+  </div>
+</div>
+
+<div class="grid-portal">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Your vault</h2><p>Files we hold for your disputes</p></div>
+      </div>
+      <% if (!documents.length) { %>
+        <div class="empty"><h3>No documents yet</h3><p>Upload an ID or a supporting letter to get started.</p></div>
+      <% } else { %>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th></th></tr></thead>
+            <tbody>
+              <% documents.forEach((doc) => { %>
+                <tr>
+                  <td>
+                    <div class="row" style="gap:9px">
+                      <svg style="width:16px;height:16px;color:var(--ink-3)"><use href="#i-file"/></svg>
+                      <div>
+                        <div class="small" style="font-weight:570"><%= doc.name %></div>
+                        <div class="tiny muted"><%= doc.ref %> · <%= doc.size || "—" %></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="small"><%= doc.type %></td>
+                  <td>
+                    <span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span>
+                    <div class="tiny muted" style="margin-top:3px">
+                      <%= doc.status === "Verified" ? "Accepted by your specialist" : "With your specialist" %>
+                    </div>
+                  </td>
+                  <td class="nowrap small muted"><%= fmtDate(doc.uploaded_at) %><div class="tiny"><%= doc.uploaded_by === "client" ? "You" : "Your specialist" %></div></td>
+                  <td class="actions">
+                    <a class="btn btn-sm btn-ghost" href="/portal/documents/<%= doc.id %>/download">Download</a>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </section>
+
+    <section class="card" id="upload">
+      <div class="card-head">
+        <div><h2>Upload a document</h2><p>PDF, PNG, JPEG or HEIC · up to 10 MB</p></div>
+      </div>
+      <form class="card-body stack" method="post" action="/portal/documents" enctype="multipart/form-data">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="form-grid">
+          <div class="field span-2">
+            <label for="pu-file">File</label>
+            <input class="input" id="pu-file" type="file" name="file" required accept=".pdf,.png,.jpg,.jpeg,.heic,.heif">
+            <span class="hint">A clear photo is fine. Every page of a statement is better than one page.</span>
+          </div>
+          <div class="field">
+            <label for="pu-type">What is it?</label>
+            <select class="select" id="pu-type" name="type">
+              <option>Identity</option><option>Evidence</option><option>Bureau response</option><option>Agreement</option>
+            </select>
+          </div>
+          <div class="field" style="align-content:end">
+            <button class="btn btn-primary" type="submit" data-busy-label="Uploading…">Upload</button>
+          </div>
+        </div>
+        <p class="tiny muted">
+          Uploads are hashed (SHA-256) on arrival so we can prove the file has not changed. Only your specialist
+          and you can open them.
+        </p>
+      </form>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Requested</h2><p>What your specialist is waiting on</p></div>
+        <span class="badge <%= openRequests.length ? "amber" : "teal" %>"><%= openRequests.length %></span>
+      </div>
+      <div class="card-body stack" style="gap:14px">
+        <% if (!openRequests.length) { %>
+          <p class="small muted">Nothing outstanding. We will ask here if a dispute needs more evidence.</p>
+        <% } else { %>
+          <% openRequests.forEach((r) => { %>
+            <div style="padding-bottom:12px;border-bottom:1px solid var(--line)">
+              <div style="font-weight:560;font-size:13.5px"><%= r.label %></div>
+              <div class="tiny muted" style="margin-top:2px"><%= r.type %><%= r.due ? ` · due ${r.due}` : "" %></div>
+              <% if (r.note) { %><div class="small muted" style="margin-top:5px"><%= r.note %></div><% } %>
+              <a class="btn btn-sm" href="#upload" style="margin-top:8px">Upload this</a>
+            </div>
+          <% }) %>
+        <% } %>
+      </div>
+    </section>
+
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:8px">What counts as good evidence</h3>
+      <ul class="checklist" style="margin-top:10px;gap:10px">
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>Full page, all four corners</strong>Bureau correspondence gets scanned or photographed flat.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>Your name visible</strong>We need to tie the document to you and to the account.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>No blacked-out account numbers</strong>We need the last four to match the tradeline.</span></li>
+      </ul>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/portal-foot") %>

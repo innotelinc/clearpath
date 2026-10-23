@@ -1,0 +1,79 @@
+<%- include("../partials/app-head", { title }) %>
+
+<%
+  const statuses = ["Needs review", "Queued", "Mailed", "Awaiting response", "Escalated", "Deleted", "Closed"];
+  const countOf = (s) => (counts.find((c) => c.status === s) || { n: 0 }).n;
+  const total = counts.reduce((n, c) => n + c.n, 0);
+  const openTotal = total - countOf("Deleted") - countOf("Closed");
+  const bureauTone = { tu: "blue", ex: "violet", eq: "teal" };
+%>
+
+<div class="page-head">
+  <div>
+    <h1>Disputes</h1>
+    <p><%= total %> on file · <%= openTotal %> open across the three bureaus</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/mailroom">Mailroom</a>
+    <a class="btn btn-primary" href="/app/clients">New dispute</a>
+  </div>
+</div>
+
+<div class="card card-pad">
+  <div class="row-between wrap-actions" style="gap:14px">
+    <div class="row wrap" style="gap:6px;flex-wrap:wrap">
+      <a class="pill <%= !status ? 'is-active' : '' %>" href="/app/disputes<%= q ? `?q=${encodeURIComponent(q)}` : '' %>">
+        All <span class="count"><%= total %></span>
+      </a>
+      <% statuses.forEach((s) => { %>
+        <a class="pill <%= status === s ? 'is-active' : '' %>"
+           href="/app/disputes?status=<%= encodeURIComponent(s) %><%= q ? `&q=${encodeURIComponent(q)}` : '' %>">
+          <%= s %> <span class="count"><%= countOf(s) %></span>
+        </a>
+      <% }) %>
+    </div>
+    <form class="filters" method="get" action="/app/disputes" role="search">
+      <% if (status) { %><input type="hidden" name="status" value="<%= status %>"><% } %>
+      <input class="input" type="search" name="q" value="<%= q %>" placeholder="Client, account or reference" aria-label="Search disputes">
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </div>
+</div>
+
+<section class="card">
+  <% if (!disputes.length) { %>
+    <div class="empty">
+      <h3>No disputes here</h3>
+      <p>Change the filter, or open a client and draft a dispute from a tradeline.</p>
+    </div>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Reference</th><th>Client</th><th>Bureau</th><th>Account</th><th>Issue</th><th>Round</th><th>Confidence</th><th>Status</th><th>Due</th><th></th></tr>
+        </thead>
+        <tbody>
+          <% disputes.forEach((d) => { %>
+            <tr>
+              <td class="mono"><a class="link" href="/app/disputes/<%= d.id %>"><%= d.ref %></a></td>
+              <td><%= d.client_name %></td>
+              <td><span class="badge plain <%= bureauTone[d.bureau] || 'gray' %>"><%= bureau[d.bureau] ? bureau[d.bureau].short : d.bureau %></span></td>
+              <td class="small"><%= d.account %></td>
+              <td class="small muted"><span class="truncate" style="display:inline-block;max-width:200px" title="<%= d.issue %>"><%= d.issue %></span></td>
+              <td class="num"><%= d.round %></td>
+              <td class="num small"><%= d.confidence %>%</td>
+              <td><span class="badge <%= statusClass(d.status) %>"><%= d.status %></span></td>
+              <td class="nowrap muted small"><%= d.due || "—" %></td>
+              <td class="actions">
+                <a class="btn btn-sm" href="/app/disputes/<%= d.id %>">Open</a>
+                <a class="btn btn-sm btn-ghost" href="/app/disputes/<%= d.id %>/letter.pdf" aria-label="Download <%= d.ref %> letter">PDF</a>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<%- include("../partials/app-foot") %>

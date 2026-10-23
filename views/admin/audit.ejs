@@ -1,0 +1,67 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Audit log</h1>
+    <p><%= entries.length %> recorded events · append-only, SHA-256 chained</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/audit.csv"><svg><use href="#i-download"/></svg> Export CSV</a>
+  </div>
+</div>
+
+<div class="notice <%= verification.ok ? "notice-ok" : "notice-error" %>" role="status">
+  <svg><use href="#<%= verification.ok ? 'i-shield' : 'i-alert' %>"/></svg>
+  <div class="grow">
+    <% if (verification.ok) { %>
+      <strong>Chain verified.</strong> All <%= verification.total %> entries hash correctly from the genesis record. The newest entry is the last row below.
+    <% } else { %>
+      <strong>Chain mismatch at entry #<%= verification.at %>.</strong> Entries after that point cannot be trusted. Restore from a known-good backup and investigate before relying on this log.
+    <% } %>
+  </div>
+</div>
+
+<div class="card card-pad">
+  <div class="row wrap-actions" style="gap:18px">
+    <div class="grow">
+      <strong class="small">How the chain works</strong>
+      <p class="tiny muted" style="margin-top:4px;max-width:78ch">
+        Each entry hashes the previous entry's hash together with its sequence number, actor, action, target and
+        timestamp. Changing any field breaks every hash after it, which is what the verification above checks.
+      </p>
+    </div>
+    <span class="chip mono">genesis · <%= "0".repeat(12) %>…</span>
+  </div>
+</div>
+
+<section class="card">
+  <% if (!entries.length) { %>
+    <div class="empty"><h3>No events yet</h3><p>Actions in the workspace appear here as they happen.</p></div>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>#</th><th>When</th><th>Actor</th><th>Action</th><th>Target</th><th>Hash</th></tr>
+        </thead>
+        <tbody>
+          <% entries.forEach((e) => { %>
+            <tr>
+              <td class="mono muted"><%= e.seq %></td>
+              <td class="nowrap small"><%= fmtDateTime(e.created_at) %></td>
+              <td class="small"><%= e.actor_name %></td>
+              <td class="small"><%= e.action %></td>
+              <td class="small muted"><%= e.target %></td>
+              <td class="mono muted" title="<%= e.hash %>"><%= String(e.hash).slice(0, 14) %>…</td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<p class="tiny muted">
+  The CSV export contains the full chain, including each entry's previous hash, for review by counsel or an examiner.
+</p>
+
+<%- include("../partials/app-foot") %>

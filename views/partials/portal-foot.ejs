@@ -1,0 +1,14 @@
+  </main>
+  <footer class="wrap" style="padding:0 24px 40px;max-width:1080px">
+    <div class="row-between wrap-actions" style="border-top:1px solid var(--line);padding-top:18px;font-size:12.5px;color:var(--ink-3)">
+      <p>
+        <%= tenant && tenant.brand_name ? tenant.brand_name : "Denovo Credit" %> ·
+        <a href="mailto:<%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %>"><%= tenant && tenant.support_email ? tenant.support_email : "hello@denovocredit.com" %></a>
+        <%= tenant && tenant.support_phone ? ` · ${tenant.support_phone}` : "" %>
+      </p>
+      <p>Portal questions are answered by your specialist, usually within one business day.</p>
+    </div>
+  </footer>
+  <script src="/assets/js/app.js" defer></script>
+</body>
+</html>

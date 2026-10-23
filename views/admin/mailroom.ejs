@@ -1,0 +1,207 @@
+<%- include("../partials/app-head", { title }) %>
+
+<%
+  const inTransit = packages.filter((p) => p.status === "In transit").length;
+  const delivered = packages.filter((p) => p.status === "Delivered").length;
+  const postage = packages.filter((p) => p.status === "Ready").reduce((n, p) => n + Number(p.cost || 0), 0);
+  const grouped = {};
+  eligible.forEach((d) => {
+    const key = d.client_id;
+    if (!grouped[key]) grouped[key] = { name: d.client_name, items: [] };
+    grouped[key].items.push(d);
+  });
+%>
+
+<div class="page-head">
+  <div>
+    <h1>Mailroom</h1>
+    <p><%= packages.length %> packages · <%= inTransit %> in transit · <%= delivered %> delivered</p>
+  </div>
+  <div class="page-actions">
+    <% if (ready.length) { %>
+      <a class="btn" href="/app/mailroom/labels.pdf">
+        <svg><use href="#i-download"/></svg> Labels PDF
+      </a>
+    <% } else { %>
+      <span class="btn" aria-disabled="true" style="opacity:.5;pointer-events:none">
+        <svg><use href="#i-download"/></svg> Labels PDF
+      </span>
+    <% } %>
+    <a class="btn btn-primary" href="/app/mailroom/queue.pdf">
+      <svg><use href="#i-printer"/></svg> Print queue
+    </a>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="card kpi">
+    <div class="kpi-label">Ready to mail</div>
+    <div class="kpi-value"><%= ready.length %></div>
+    <div class="kpi-meta">Awaiting a tracking number</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Postage due</div>
+    <div class="kpi-value"><%= money(postage) %></div>
+    <div class="kpi-meta">Certified and return receipt at cost</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">Letters eligible</div>
+    <div class="kpi-value"><%= eligible.length %></div>
+    <div class="kpi-meta">Needs review or queued</div>
+  </div>
+  <div class="card kpi">
+    <div class="kpi-label">In transit</div>
+    <div class="kpi-value"><%= inTransit %></div>
+    <div class="kpi-meta">Tracking attached to the case</div>
+  </div>
+</div>
+
+<div class="dash-grid">
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Packages</h2>
+        <p>One envelope per client and bureau</p>
+      </div>
+      <% if (ready.length) { %><span class="badge amber"><%= ready.length %> ready</span><% } %>
+    </div>
+    <% if (!packages.length) { %>
+      <div class="empty">
+        <h3>No packages yet</h3>
+        <p>Select approved letters on the right. Clearpath groups them by client and bureau, prices the postage and assigns a package ID.</p>
+      </div>
+    <% } else { %>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Package</th><th>Client</th><th>Bureau</th><th>Letters</th><th>Method</th><th>Status</th><th>Tracking</th><th></th></tr></thead>
+          <tbody>
+            <% packages.forEach((p) => { %>
+              <tr>
+                <td class="mono"><%= p.ref %></td>
+                <td><%= p.client_name %></td>
+                <td><%= bureau[p.bureau] ? bureau[p.bureau].name : p.bureau %></td>
+                <td class="num"><%= p.letters %></td>
+                <td class="small"><%= p.method %><div class="tiny muted"><%= money(p.cost) %></div></td>
+                <td><span class="badge <%= statusClass(p.status) %>"><%= p.status %></span></td>
+                <td class="small">
+                  <% if (p.tracking) { %>
+                    <span class="mono"><%= p.tracking %></span>
+                    <div class="tiny muted"><%= p.eta || "" %></div>
+                  <% } else { %>
+                    <span class="muted">—</span>
+                  <% } %>
+                </td>
+                <td class="actions">
+                  <% if (p.status === "Ready") { %>
+                    <button class="btn btn-sm" type="button" data-open="mail-<%= p.id %>">Mark mailed</button>
+                  <% } else { %>
+                    <span class="tiny muted"><%= p.eta || "In transit" %></span>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Build a package</h2>
+        <p>Select letters, choose the service, print</p>
+      </div>
+    </div>
+    <% if (!eligible.length) { %>
+      <div class="empty">
+        <h3>Nothing to mail</h3>
+        <p>Every approved letter has been packaged. New disputes in <em>Needs review</em> or <em>Queued</em> appear here.</p>
+      </div>
+    <% } else { %>
+      <form class="card-body" method="post" action="/app/mailroom/packages">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <div class="stack" style="gap:14px;max-height:420px;overflow:auto;padding-right:4px">
+          <% Object.values(grouped).forEach((group) => { %>
+            <div>
+              <div class="row-between" style="margin-bottom:6px">
+                <strong class="small"><%= group.name %></strong>
+                <span class="tiny muted"><%= group.items.length %> letter<%= group.items.length === 1 ? "" : "s" %></span>
+              </div>
+              <div class="stack" style="gap:6px">
+                <% group.items.forEach((d) => { %>
+                  <label class="check" style="padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:var(--paper-2)">
+                    <input type="checkbox" name="dispute_ids" value="<%= d.id %>" checked>
+                    <span class="grow">
+                      <span style="display:block;font-weight:550"><%= d.ref %> · <%= bureau[d.bureau] ? bureau[d.bureau].short : d.bureau %></span>
+                      <span class="tiny muted"><%= d.account %> · <%= d.issue %></span>
+                    </span>
+                  </label>
+                <% }) %>
+              </div>
+            </div>
+          <% }) %>
+        </div>
+
+        <hr style="margin:16px 0">
+
+        <div class="form-grid">
+          <div class="field">
+            <label for="m-method">Service</label>
+            <select class="select" id="m-method" name="method">
+              <option value="certified">Certified mail · $8.20</option>
+              <option value="priority">Priority mail · $9.45</option>
+              <option value="standard">Standard mail · $1.10</option>
+            </select>
+          </div>
+          <div class="field" style="align-content:end">
+            <label class="check">
+              <input type="checkbox" name="return_receipt" checked>
+              <span>Return receipt <span class="tiny muted">(+$1.65)</span></span>
+            </label>
+          </div>
+        </div>
+
+        <p class="tiny muted" style="margin-top:12px">
+          Letters are grouped automatically: one package per client and bureau. Each package gets its own
+          reference and printed label.
+        </p>
+        <button class="btn btn-primary btn-block" type="submit" style="margin-top:12px" data-busy-label="Building…">
+          Create package<%= Object.keys(grouped).length > 1 ? "s" : "" %>
+        </button>
+      </form>
+    <% } %>
+  </section>
+</div>
+
+<% ready.forEach((p) => { %>
+  <dialog class="modal" id="mail-<%= p.id %>" aria-labelledby="mail-title-<%= p.id %>">
+    <form method="post" action="/app/mailroom/<%= p.id %>/mailed">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <div class="modal-head">
+        <div>
+          <h2 id="mail-title-<%= p.id %>">Mark <%= p.ref %> mailed</h2>
+          <p><%= p.client_name %> · <%= bureau[p.bureau] ? bureau[p.bureau].name : p.bureau %> · <%= p.letters %> letter<%= p.letters === 1 ? "" : "s" %></p>
+        </div>
+        <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="tr-<%= p.id %>">Certified tracking number</label>
+          <input class="input mono" id="tr-<%= p.id %>" name="tracking" maxlength="40" placeholder="9405 5118 9956 0000 0000 42">
+          <span class="hint">Optional, but it is what the client sees in the portal.</span>
+        </div>
+        <div class="notice notice-info">
+          <svg><use href="#i-clock"/></svg>
+          <div>Marking this mailed moves every eligible dispute for this client and bureau to <strong>Mailed</strong> and starts the 30-day response clock.</div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn" type="button" data-close>Cancel</button>
+        <button class="btn btn-primary" type="submit">Confirm mailing</button>
+      </div>
+    </form>
+  </dialog>
+<% }) %>
+
+<%- include("../partials/app-foot") %>

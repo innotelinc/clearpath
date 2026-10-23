@@ -1,0 +1,19 @@
+<%- include("partials/site-head", { title }) %>
+
+<article class="doc-body">
+  <a class="eyebrow" href="/">Back to denovocredit.com</a>
+  <h1 style="margin-top:14px"><%= doc.title %></h1>
+  <p class="small muted">Last updated <%= fmtDate(new Date(), "—") %></p>
+  <p style="margin-top:22px;font-size:16px"><%= doc.intro %></p>
+  <% doc.sections.forEach(([heading, body]) => { %>
+    <h2><%= heading %></h2>
+    <p><%= body %></p>
+  <% }) %>
+  <hr style="margin:34px 0 20px">
+  <p class="small muted">
+    Clearpath is operated by Denovo Credit · denovocredit.com.
+    Questions: <a href="mailto:<%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %>"><%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %></a>
+  </p>
+</article>
+
+<%- include("partials/site-foot") %>

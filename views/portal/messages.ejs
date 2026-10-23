@@ -1,0 +1,72 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Messages</h1>
+    <p>One thread with your specialist, attached to your case</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/portal">Back to your file</a>
+  </div>
+</div>
+
+<div class="grid-portal">
+  <section class="card">
+    <div class="card-head">
+      <div><h2>Conversation</h2><p><%= messages.length %> message<%= messages.length === 1 ? "" : "s" %></p></div>
+      <div class="row" style="gap:8px">
+        <span class="avatar" aria-hidden="true"><%= initials(user.name) %></span>
+        <span class="avatar" style="background:var(--paper-3);color:var(--ink-2)" aria-hidden="true">DC</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="message-thread" style="max-height:none">
+        <% if (!messages.length) { %>
+          <div class="empty" style="padding:24px 0">
+            <h3>No messages yet</h3>
+            <p>Ask about a dispute, a deadline, or a document. Your specialist replies here — not by phone tag.</p>
+          </div>
+        <% } %>
+        <% messages.forEach((m) => { %>
+          <div class="msg <%= m.author_role %>">
+            <div class="who"><%= m.author_name %> · <%= fmtDateTime(m.created_at) %></div>
+            <%= m.body %>
+          </div>
+        <% }) %>
+      </div>
+    </div>
+    <form class="card-body stack" method="post" action="/portal/messages" style="border-top:1px solid var(--line)">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <label class="sr-only" for="pm-body">Message</label>
+      <textarea class="textarea" id="pm-body" name="body" rows="3" maxlength="2000" required
+                placeholder="Write to your specialist…"></textarea>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit" data-busy-label="Sending…">Send message</button>
+        <span class="tiny muted">Do not send full account numbers or your Social Security number here.</span>
+      </div>
+    </form>
+  </section>
+
+  <aside class="stack">
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:10px">Reach us directly</h3>
+      <p class="small"><%= tenant && tenant.brand_name ? tenant.brand_name : "Denovo Credit" %></p>
+      <p class="small" style="margin-top:6px">
+        <a href="mailto:<%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %>"><%= tenant && tenant.support_email ? tenant.support_email : "hello@denovocredit.com" %></a>
+      </p>
+      <p class="small muted" style="margin-top:4px"><%= tenant && tenant.support_phone ? tenant.support_phone : "(415) 555-0100" %></p>
+      <p class="small muted" style="margin-top:10px"><%= tenant && tenant.address ? tenant.address : "" %></p>
+    </section>
+
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:8px">Response times</h3>
+      <p class="small muted">Messages sent before 4pm Pacific are answered the same business day. Anything later is answered the next morning.</p>
+      <hr style="margin:14px 0">
+      <p class="tiny muted">For anything urgent — a court date, a garnishment notice — call rather than message.</p>
+    </section>
+  </aside>
+</div>
+
+<%- include("../partials/portal-foot") %>

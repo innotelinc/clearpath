@@ -1,0 +1,117 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Clients</h1>
+    <p><%= clients.length %> shown<%= stage || q ? " for this filter" : "" %> · <%= counts.reduce((n, c) => n + c.n, 0) %> in the workspace</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/app/documents">Document requests</a>
+    <button class="btn btn-primary" type="button" data-open="new-client"><svg><use href="#i-plus"/></svg> New client</button>
+  </div>
+</div>
+
+<div class="card card-pad">
+  <form class="filters" method="get" action="/app/clients" role="search">
+    <input class="input grow" type="search" name="q" value="<%= q %>" placeholder="Search name, email or reference" aria-label="Search clients" data-quick-search>
+    <select class="select" name="stage" aria-label="Filter by stage" data-auto-filter>
+      <option value="">All stages</option>
+      <% ["Onboarding", "Active", "Review", "Graduated"].forEach((s) => { %>
+        <option value="<%= s %>" <%= stage === s ? "selected" : "" %>><%= s %><%= counts.find((c) => c.stage === s) ? ` (${counts.find((c) => c.stage === s).n})` : "" %></option>
+      <% }) %>
+    </select>
+    <button class="btn" type="submit">Search</button>
+    <% if (q || stage) { %><a class="btn btn-ghost" href="/app/clients">Clear</a><% } %>
+  </form>
+</div>
+
+<section class="card">
+  <% if (!clients.length) { %>
+    <div class="empty">
+      <h3>No clients match</h3>
+      <p>Try a different search, clear the stage filter, or add a new client to the workspace.</p>
+    </div>
+  <% } else { %>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Client</th><th>Reference</th><th>Stage</th><th>Scores</th><th>Documents</th><th>Portal</th><th>Joined</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% clients.forEach((c) => { %>
+            <tr>
+              <td>
+                <a class="who" href="/app/clients/<%= c.id %>">
+                  <span class="avatar"><%= initials(c.name) %></span>
+                  <span>
+                    <span class="title" style="display:block;font-weight:570"><%= c.name %></span>
+                    <span class="meta" style="display:block;font-size:12px;color:var(--ink-3)"><%= c.email %></span>
+                  </span>
+                </a>
+              </td>
+              <td class="mono"><%= c.ref %></td>
+              <td><span class="badge <%= statusClass(c.stage) %>"><%= c.stage %></span></td>
+              <td class="nowrap num">
+                <span class="muted tiny">TU</span> <%= c.tu %>
+                <span class="muted tiny" style="margin-left:8px">EX</span> <%= c.ex %>
+                <span class="muted tiny" style="margin-left:8px">EQ</span> <%= c.eq %>
+              </td>
+              <td class="nowrap">
+                <span class="tiny"><%= c.docs_verified %>/<%= c.docs_total %> verified</span>
+              </td>
+              <td><span class="badge <%= c.portal_status === "Active" ? "teal" : "gray" %>"><%= c.portal_status %></span></td>
+              <td class="nowrap muted"><%= c.joined %></td>
+              <td class="actions"><a class="btn btn-sm" href="/app/clients/<%= c.id %>">Open</a></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<dialog class="modal" id="new-client" aria-labelledby="new-client-title">
+  <form method="post" action="/app/clients">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <div class="modal-head">
+      <div>
+        <h2 id="new-client-title">New client</h2>
+        <p>Creates the case record; portal access is invited separately.</p>
+      </div>
+      <button class="icon-btn" type="button" data-close aria-label="Close"><svg><use href="#i-x"/></svg></button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span-2">
+          <label for="nc-name">Full name</label>
+          <input class="input" id="nc-name" name="name" required minlength="2" maxlength="80" placeholder="Jordan Alvarez">
+        </div>
+        <div class="field">
+          <label for="nc-email">Email</label>
+          <input class="input" id="nc-email" name="email" type="email" required maxlength="120" placeholder="jordan@example.com">
+        </div>
+        <div class="field">
+          <label for="nc-phone">Phone</label>
+          <input class="input" id="nc-phone" name="phone" maxlength="40" placeholder="(415) 555-0142">
+        </div>
+        <div class="field span-2">
+          <label for="nc-stage">Stage</label>
+          <select class="select" id="nc-stage" name="stage">
+            <option>Onboarding</option>
+            <option>Active</option>
+            <option>Review</option>
+            <option>Graduated</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-close>Cancel</button>
+      <button class="btn btn-primary" type="submit" data-busy-label="Creating…">Create client</button>
+    </div>
+  </form>
+</dialog>
+
+<%- include("../partials/app-foot") %>
