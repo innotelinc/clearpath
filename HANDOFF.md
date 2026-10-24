@@ -14,6 +14,7 @@ Written 2026-10-23 so work can continue in a CLI session. Everything here lives 
 | Tests | `npm test` — 45 end-to-end tests, all passing (platform console, suspension, automation, mailed-package archive, Lob send + webhook, Stripe billing against a mock) |
 | Dev server | `PORT=3400 DATA_DIR=./data node server/index.js` (log: `.server.log`) |
 | Production entry | `Dockerfile` + `docker-compose.yml` (image not built here: no Docker on this machine) |
+| Hosted | **https://app.denovocredit.com** — incus container `clearpath` on i2, systemd, Stalwart SMTP. See `DEPLOY.md`. |
 | Git | branch `main`, pushed to `https://github.com/innotelinc/clearpath` (public) |
 | Latest commit | see `git log -1` — Stripe billing, operator payments page, README credentials |
 
@@ -200,8 +201,9 @@ the last one.
 
 ## Known gaps / sensible next steps
 
-- **No SMTP transport.** Providers are HTTPS APIs only. If an agency wants to send from a
-  mailbox (Google Workspace, SES SMTP), add a transport function in `server/mail.js`.
+- **SMTP is live in production** (Stalwart submission, app password — see `DEPLOY.md` for why
+  a normal password cannot be used against an OIDC directory). The old gap was that providers
+  were HTTPS APIs only; `server/mail.js` now carries a `smtp` transport.
 - **Rate limiting is in-memory** — fine for one instance, resets on restart, not shared.
 - **No account deletion or deactivation.** Invites cannot be revoked; owners cannot remove a
   teammate. Next obvious admin feature.
