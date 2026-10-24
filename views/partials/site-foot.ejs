@@ -2,6 +2,8 @@
   const brand = tenant || hostTenant;
   const siteName = brand ? brand.brand_name : "Denovo Credit";
   const supportEmail = (brand && brand.support_email) || "hello@denovocredit.com";
+  const supportPhone = (brand && brand.support_phone) || "(774) 505-7135";
+  const supportFax = (brand && brand.support_fax) || "(774) 505-7136";
 %>  </main>
   <footer class="site-foot">
     <div class="wrap">
@@ -16,7 +18,9 @@
           </p>
           <p class="small" style="margin-top:14px">
             <a href="mailto:<%= supportEmail %>"><%= supportEmail %></a><br>
-            <span class="muted"><%= brand && brand.support_phone ? brand.support_phone : "(415) 555-0100" %></span>
+            <span class="muted">Phone <a href="tel:+17745057135"><%= supportPhone %></a></span><br>
+            <span class="muted">Fax <a href="tel:+17745057136"><%= supportFax %></a></span><br>
+            <span class="muted">Mon–Fri, 9–6 ET</span>
           </p>
         </div>
         <div>

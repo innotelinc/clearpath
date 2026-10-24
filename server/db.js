@@ -515,7 +515,7 @@ export function seedDemo() {
       "DC",
       "#1f5eff",
       "hello@denovocredit.com",
-      "(415) 555-0100",
+      "(774) 505-7135",
       "2200 Market St, Suite 410 · San Francisco, CA 94114",
       "Client portal",
       "Track every dispute, upload what we need, and see exactly what changed on your file."

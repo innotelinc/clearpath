@@ -5,7 +5,7 @@ first real deployment; the app-level documentation stays in `README.md` and the
 design history in `HANDOFF.md`.
 
 ```
-https://app.denovocredit.com
+https://denovocredit.com  (and www, app)
   → NPM edge (proxy container, 192.168.1.71:443)
   → clearpath container on i2, 192.168.1.83:3000
   → Stalwart (oasis, mail container on i3) for outbound email
@@ -61,21 +61,31 @@ DNS is the estate resolver (Technitium behind Cerulean); the zone
 
 | Piece | Value |
 | --- | --- |
-| Record | `app.denovocredit.com CNAME denovocredit.com.` (Cerulean domain id 7) |
-| Certificate | `*.denovocredit.com` from Cerulean (Let's Encrypt, DNS-01), already imported into NPM as certificate `67` |
-| NPM proxy host | id `274` → `http://192.168.1.83:3000`, SSL forced, HTTP/2, websocket upgrade, no caching |
-
-`www.denovocredit.com` and the apex are untouched: they still serve the WordPress
-site on the `www` container (192.168.1.80). Flipping the apex to Clearpath is a
-one-line change on proxy host 71 if that is ever wanted:
-
-```bash
-# on the proxy container
-npm-edit.py forward denovocredit.com 192.168.1.83 3000
-```
+| Records | apex `A 73.68.203.71` (already in the zone); `app.denovocredit.com CNAME denovocredit.com.` (Cerulean domain id 7) |
+| Certificate | `*.denovocredit.com` from Cerulean (Let's Encrypt, DNS-01), imported into NPM as certificate `67` — covers apex, `www`, `app` and any other name |
+| NPM proxy host 71 | apex + `www` → `http://192.168.1.83:3000`, SSL forced, HTTP/2, websocket upgrade, no caching (was the WordPress site until 2026-10-24) |
+| NPM proxy host 274 | `app.denovocredit.com` → `http://192.168.1.83:3000`, same settings |
 
 The app routes tenants by `Host` header, so extra names (`portal.`, `app2.`) only
 need a CNAME plus a proxy host; nothing in the app changes.
+
+### WordPress retirement (2026-10-24)
+
+The apex used to serve the Denovo WordPress site from the `www` container
+(`192.168.1.80`, Apache + MySQL, `/var/www/denovocredit`). That vhost is now
+disabled; the files and database are backed up on the container:
+
+```
+/var/backups/denovocredit-files-20261024.tar.gz   (174 MB)
+/var/backups/denovocredit-db-20261024.sql         (8 MB)
+```
+
+To bring it back: `incus exec www -- a2ensite denovocredit.com denovocredit.com-le-ssl`,
+reload Apache, and point NPM host 71 back at `https://192.168.1.80:443`. The
+certificates under `/etc/letsencrypt/live/denovocredit.com` are shared with the
+`cattape.us` vhost and must not be deleted. The other WordPress sites on that
+container (cattape.us, usagents.pro, hdlogistics.pro, pickleme.world) were
+verified unaffected.
 
 ## Outbound email (Stalwart)
 
@@ -123,6 +133,7 @@ themselves and the deterministic drafter keeps working.
 | `APP_ORIGIN` | `https://app.denovocredit.com` |
 | `MAIL_TRANSPORT` / `SMTP_*` | `smtp` / `mail.innotel.us`, `465`, implicit TLS |
 | `PLATFORM_ADMIN_EMAIL` | `platform@denovocredit.com` (password in `.env`) |
+| Contact details | `SUPPORT_EMAIL=hello@denovocredit.com`; the tenant row carries phone `(774) 505-7135`, and the landing page and footer print phone, fax `(774) 505-7136` and “Mon–Fri, 9–6 ET” |
 | `STRIPE_*`, `LOB_*` | unset — both surfaces stay hidden |
 
 Demo sign-ins while `SEED_DEMO=1`: owner `dana@denovocredit.com` / `Denovo!2026`,
@@ -133,7 +144,8 @@ which is skipped when both platform variables are set).
 
 ## Verified on 2026-10-24
 
-- `https://app.denovocredit.com/` → 200, valid `*.denovocredit.com` certificate.
+- `https://denovocredit.com/`, `https://www.denovocredit.com/` and `https://app.denovocredit.com/` → 200, valid `*.denovocredit.com` certificate.
+- Landing page: client sign-in in the header, agency sign-in in the footer, phone/fax/ET in both the contact block and the footer.
 - Owner sign-in over the public URL; `/app`, `/app/clients`, `/app/mailroom`,
   `/app/mail-log`, `/app/studio`, `/app/settings`, `/app/billing` all 200.
 - Settings → Email delivery reads `smtp`, `mail.innotel.us:465 · implicit TLS`,

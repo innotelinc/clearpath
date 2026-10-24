@@ -418,8 +418,13 @@
           <p style="margin-top:6px;font-size:15px">
             <a href="mailto:<%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %>"><%= tenant && tenant.support_email ? tenant.support_email : 'hello@denovocredit.com' %></a>
           </p>
-          <p class="small" style="color:#93a5c0;margin-top:4px"><%= tenant && tenant.support_phone ? tenant.support_phone : '(415) 555-0100' %></p>
-          <p class="small" style="color:#93a5c0;margin-top:14px">Mon–Fri, 9–6 Pacific</p>
+          <p class="small" style="color:#93a5c0;margin-top:4px">
+            Phone <a href="tel:+17745057135"><%= tenant && tenant.support_phone ? tenant.support_phone : '(774) 505-7135' %></a>
+          </p>
+          <p class="small" style="color:#93a5c0;margin-top:4px">
+            Fax <a href="tel:+17745057136"><%= tenant && tenant.support_fax ? tenant.support_fax : '(774) 505-7136' %></a>
+          </p>
+          <p class="small" style="color:#93a5c0;margin-top:14px">Mon–Fri, 9–6 ET</p>
           <a class="btn btn-sm" href="/login" style="margin-top:16px;background:transparent;border-color:#2f4a6b;color:#e7f0fb">Agency sign in</a>
         </div>
       </div>
