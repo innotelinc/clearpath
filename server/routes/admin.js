@@ -1,7 +1,7 @@
 import { Router } from "express";
 import fs from "node:fs";
 import path from "node:path";
-import { DATA_DIR, db, audit, auditEntries, emailRows, latestInsight, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
+import { db, audit, auditEntries, emailRows, latestInsight, nextDocRef, nextRef, tenantStats, verifyAuditChain } from "../db.js";
 import { aiChat, aiConfigured, parseJsonReply } from "../ai.js";
 import { approvePipeline, runPipeline, scanPipeline } from "../pipeline.js";
 import { hashPassword, verifyPassword, strongEnough } from "../security.js";
@@ -12,9 +12,14 @@ import { BUREAUS, letterPdf, letterText, labelsPdf, queuePdf } from "../pdf.js";
 import { createCertifiedLetter, lobConfigured, lobMode, parseAddress } from "../lob.js";
 import {
   allRequests, clientDisputes, clientDocuments, clientMessages, clientPackages, clientRequests,
-  clientTradelines, clientsMap, getClient, getDispute, getDocument, listClients, listDisputes,
-  listDocuments, listPackages, liveLetterBody
+  clientTradelines, clientsMap, getClient, getDispute, getDocument, letterEvidence, listClients,
+  listDisputes, listDocuments, listPackages, liveLetterBody
 } from "../data.js";
+import {
+  attachEvidence, autoAttachEvidenceForDispute, autoAttachEvidenceForDocument,
+  detachEvidence, evidenceDocuments, unattachedDocuments
+} from "../evidence.js";
+import { ensureDocumentFile } from "../demo-files.js";
 import { bureau, fmtDate, fmtDay, money, sendPdf } from "../util.js";
 import { sizeLabel, sha256, storeUpload } from "../uploads.js";
 
@@ -49,7 +54,7 @@ function captureLetters(tenant, pkg, letterIds, t) {
       type: full.tradeline_type || "Collection",
       balance: full.balance || 0,
       reason: full.issue,
-      evidence: full.evidence || "[]"
+      evidence: letterEvidence(full)
     };
     const body = letterText({
       tenant,
@@ -265,7 +270,7 @@ router.get("/disputes/:id", (req, res) => {
     type: dispute.tradeline_type || "Collection",
     balance: dispute.balance || 0,
     reason: dispute.issue,
-    evidence: dispute.evidence || "[]"
+    evidence: dispute.tradeline_evidence || "[]"
   };
   const shipment = db
     .prepare("SELECT * FROM packages WHERE tenant_id = ? AND client_id = ? AND bureau = ? ORDER BY id DESC LIMIT 1")
@@ -275,8 +280,15 @@ router.get("/disputes/:id", (req, res) => {
     page: "disputes",
     dispute,
     tradeline,
+    evidenceDocs: evidenceDocuments(t, dispute.id),
+    availableDocs: unattachedDocuments(t, dispute.id, dispute.client_id),
     shipment,
-    letter: letterText({ tenant: req.tenant, client: { name: dispute.client_name, email: dispute.client_email, phone: dispute.client_phone }, dispute, tradeline }),
+    letter: letterText({
+      tenant: req.tenant,
+      client: { name: dispute.client_name, email: dispute.client_email, phone: dispute.client_phone },
+      dispute,
+      tradeline: { ...tradeline, evidence: letterEvidence(dispute) }
+    }),
     statuses: STATUSES
   });
 });
@@ -292,7 +304,7 @@ router.get("/disputes/:id/letter.pdf", (req, res) => {
     type: dispute.tradeline_type || "Collection",
     balance: dispute.balance || 0,
     reason: dispute.issue,
-    evidence: dispute.evidence || "[]"
+    evidence: letterEvidence(dispute)
   };
   sendPdf(res, `${dispute.ref}-${dispute.client_name.replace(/\s+/g, "-")}.pdf`, letterPdf({ tenant: req.tenant, client, dispute, tradeline }));
 });
@@ -320,8 +332,42 @@ router.post("/disputes", (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Needs review', ?)`
     ).run(t, client.id, tradeline ? tradeline.id : null, ref, bureauKey, account, issue, round, confidence).lastInsertRowid
   );
+  const linked = autoAttachEvidenceForDispute(t, disputeId);
   audit(t, actor(req), "Created dispute", `${ref} · ${client.name}`);
-  back(res, `/app/disputes/${disputeId}`, { notice: `${ref} created and ready for review.` });
+  back(res, `/app/disputes/${disputeId}`, {
+    notice: `${ref} created and ready for review.${linked ? ` ${linked} document${linked === 1 ? "" : "s"} from the vault attached as evidence.` : ""}`
+  });
+});
+
+/** Attach one document from the client's vault to this dispute. */
+router.post("/disputes/:id/evidence", (req, res) => {
+  const t = tenantId(req);
+  const dispute = getDispute(t, req.params.id);
+  if (!dispute) return fail(res, 404, "Dispute not found", "That dispute is not in this workspace.");
+  const doc = getDocument(t, req.body.document_id);
+  if (!doc || doc.client_id !== dispute.client_id) {
+    return back(res, `/app/disputes/${dispute.id}`, { error: "Choose a document from this client's vault." });
+  }
+  if (!attachEvidence(t, dispute.id, doc.id)) {
+    return back(res, `/app/disputes/${dispute.id}`, { error: "That document could not be attached." });
+  }
+  audit(t, actor(req), "Attached evidence to", `${dispute.ref} · ${doc.name}`);
+  back(res, `/app/disputes/${dispute.id}`, { notice: `${doc.name} attached to ${dispute.ref}.` });
+});
+
+/** Take one document off this dispute. The decision survives a restart. */
+router.post("/disputes/:id/evidence/:documentId/detach", (req, res) => {
+  const t = tenantId(req);
+  const dispute = getDispute(t, req.params.id);
+  if (!dispute) return fail(res, 404, "Dispute not found", "That dispute is not in this workspace.");
+  const doc = getDocument(t, req.params.documentId);
+  if (!doc || doc.client_id !== dispute.client_id) {
+    return fail(res, 404, "Document not found", "That document is not in this client's vault.");
+  }
+  if (detachEvidence(t, dispute.id, doc.id)) {
+    audit(t, actor(req), "Detached evidence from", `${dispute.ref} · ${doc.name}`);
+  }
+  back(res, `/app/disputes/${dispute.id}`, { notice: `${doc.name} is no longer attached.` });
 });
 
 router.post("/disputes/:id", (req, res) => {
@@ -482,7 +528,7 @@ router.get("/mailroom/queue.pdf", (req, res) => {
       type: full.tradeline_type || "Collection",
       balance: full.balance || 0,
       reason: full.issue,
-      evidence: full.evidence || "[]"
+      evidence: letterEvidence(full)
     };
     return {
       ...d,
@@ -549,7 +595,7 @@ router.post("/mailroom/:id/send", async (req, res) => {
       type: full.tradeline_type || "Collection",
       balance: full.balance || 0,
       reason: full.issue,
-      evidence: full.evidence || "[]"
+      evidence: letterEvidence(full)
     };
     const body = letterText({
       tenant: req.tenant,
@@ -675,13 +721,18 @@ router.post("/documents", (req, res) => {
   const stored = storeUpload(req.file, t, client.id);
   const digest = sha256(req.file.buffer);
   const ref = nextDocRef(t);
-  db.prepare(
-    `INSERT INTO documents (tenant_id, client_id, ref, name, type, status, size, sha256, stored_name, uploaded_by, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, 'Pending review', ?, ?, ?, 'agency', ?)`
-  ).run(t, client.id, ref, req.file.originalname.slice(0, 180), String(req.body.type || "Evidence").slice(0, 40), sizeLabel(req.file.size), digest, stored, new Date().toISOString());
+  const documentId = Number(
+    db.prepare(
+      `INSERT INTO documents (tenant_id, client_id, ref, name, type, status, size, sha256, stored_name, uploaded_by, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, 'Pending review', ?, ?, ?, 'agency', ?)`
+    ).run(t, client.id, ref, req.file.originalname.slice(0, 180), String(req.body.type || "Evidence").slice(0, 40), sizeLabel(req.file.size), digest, stored, new Date().toISOString()).lastInsertRowid
+  );
   db.prepare("UPDATE clients SET docs_total = docs_total + 1 WHERE id = ?").run(client.id);
+  const linked = autoAttachEvidenceForDocument(t, documentId);
   audit(t, actor(req), "Uploaded document for", client.name);
-  back(res, "/app/documents", { notice: `${req.file.originalname} uploaded · SHA-256 ${digest.slice(0, 12)}…` });
+  back(res, "/app/documents", {
+    notice: `${req.file.originalname} uploaded · SHA-256 ${digest.slice(0, 12)}…${linked ? ` · attached to ${linked} dispute${linked === 1 ? "" : "s"}` : ""}`
+  });
 });
 
 /** Openable types, so a preview can be served with the browser's own viewer. */
@@ -694,10 +745,15 @@ const DOC_TYPES = {
   heif: "image/heif"
 };
 
-function documentFile(doc) {
-  if (!doc?.stored_name) return null;
-  const file = path.join(DATA_DIR, "uploads", path.basename(doc.stored_name));
-  return fs.existsSync(file) ? file : null;
+/**
+ * The file behind a record, generated from its metadata when it has none.
+ *
+ * Seeded documents carry no scan, and a restored uploads directory can lose
+ * one. `ensureDocumentFile` writes a demonstration PDF in demo mode, so the
+ * preview and download never dead-end on a record the page says exists.
+ */
+function documentFile(tenant, doc) {
+  return ensureDocumentFile(tenant, doc);
 }
 
 /** Review one document: the file itself, its metadata, and the verify action. */
@@ -705,7 +761,7 @@ router.get("/documents/:id", (req, res) => {
   const t = tenantId(req);
   const doc = getDocument(t, req.params.id);
   if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
-  const file = documentFile(doc);
+  const file = documentFile(req.tenant, doc);
   const ext = file ? path.extname(file).slice(1).toLowerCase() : "";
   res.render("admin/document", {
     title: doc.name,
@@ -723,7 +779,7 @@ router.get("/documents/:id/file", (req, res) => {
   const t = tenantId(req);
   const doc = getDocument(t, req.params.id);
   if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
-  const file = documentFile(doc);
+  const file = documentFile(req.tenant, doc);
   if (!file) return fail(res, 404, "No file attached", "This record has metadata only. Upload the file to replace it.");
   const ext = path.extname(file).slice(1).toLowerCase();
   res.setHeader("Content-Type", DOC_TYPES[ext] || "application/octet-stream");
@@ -751,7 +807,7 @@ router.get("/documents/:id/download", (req, res) => {
   const t = tenantId(req);
   const doc = getDocument(t, req.params.id);
   if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
-  const file = documentFile(doc);
+  const file = documentFile(req.tenant, doc);
   if (!file) {
     return fail(res, 404, "No file attached", "This record has metadata only, so there is nothing to download yet. Open it to review the details.");
   }
@@ -949,6 +1005,7 @@ router.post("/studio/:id", (req, res) => {
     ).lastInsertRowid
   );
   db.prepare("UPDATE drafts SET status = 'Approved', dispute_id = ? WHERE id = ? AND tenant_id = ?").run(disputeId, draft.id, t);
+  autoAttachEvidenceForDispute(t, disputeId);
   audit(t, actor(req), "Approved a studio draft for", `${draft.client_name} · ${ref}`);
   back(res, `/app/disputes/${disputeId}`, { notice: `${ref} created from the approved draft.` });
 });

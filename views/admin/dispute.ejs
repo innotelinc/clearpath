@@ -47,17 +47,70 @@
     </section>
 
     <section class="card">
-      <div class="card-head"><div><h2>Evidence on file</h2><p>Every claim in the letter should have a document behind it</p></div></div>
+      <div class="card-head">
+        <div>
+          <h2>Evidence on file</h2>
+          <p><%= evidenceDocs.length %> document<%= evidenceDocs.length === 1 ? "" : "s" %> attached · documents in the vault that name this creditor attach themselves</p>
+        </div>
+      </div>
       <div class="card-body">
-        <% if (!evidence.length) { %>
-          <p class="small muted">No evidence attached to this tradeline. Add documents to the client's vault before mailing.</p>
+        <% if (evidenceDocs.length) { %>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Document</th><th>Type</th><th>Status</th><th>Uploaded</th><th></th></tr></thead>
+              <tbody>
+                <% evidenceDocs.forEach((doc) => { %>
+                  <tr>
+                    <td class="small">
+                      <a class="link" href="/app/documents/<%= doc.id %>?from=client"><strong><%= doc.name %></strong></a>
+                      <div class="tiny muted"><%= doc.ref %><%= doc.link_source === "auto" ? " · attached automatically" : "" %></div>
+                    </td>
+                    <td class="small"><%= doc.type %></td>
+                    <td><span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span></td>
+                    <td class="nowrap muted small"><%= fmtDate(doc.uploaded_at) %> · <%= doc.uploaded_by %></td>
+                    <td class="actions">
+                      <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
+                      <form method="post" action="/app/disputes/<%= dispute.id %>/evidence/<%= doc.id %>/detach" style="display:inline">
+                        <input type="hidden" name="_csrf" value="<%= csrf %>">
+                        <button class="btn btn-sm btn-ghost" type="submit">Detach</button>
+                      </form>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
         <% } else { %>
-          <div class="row wrap" style="gap:8px">
+          <p class="small muted">Nothing is attached yet. A document named for this account (for example
+            <em>Toyota payment history.pdf</em>) attaches from the client's vault as soon as it exists.</p>
+        <% } %>
+
+        <% if (evidence.length) { %>
+          <p class="tiny muted" style="margin-top:14px">Noted on the tradeline</p>
+          <div class="row wrap" style="gap:8px;margin-top:6px">
             <% evidence.forEach((item) => { %>
               <span class="chip"><svg style="width:12px;height:12px;color:var(--teal)"><use href="#i-check"/></svg><%= item %></span>
             <% }) %>
           </div>
         <% } %>
+
+        <% if (availableDocs.length) { %>
+          <form class="row wrap" method="post" action="/app/disputes/<%= dispute.id %>/evidence" style="margin-top:16px;gap:8px;align-items:flex-end">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <div class="field grow" style="min-width:220px">
+              <label for="ev-doc">Attach another document from this client's vault</label>
+              <select class="select" id="ev-doc" name="document_id">
+                <% availableDocs.forEach((doc) => { %>
+                  <option value="<%= doc.id %>"><%= doc.name %> · <%= doc.type %></option>
+                <% }) %>
+              </select>
+            </div>
+            <button class="btn btn-sm" type="submit">Attach</button>
+          </form>
+        <% } else { %>
+          <p class="tiny muted" style="margin-top:14px">Every document in this client's vault is already attached.</p>
+        <% } %>
+
         <div class="row" style="margin-top:16px">
           <a class="btn btn-sm" href="/app/clients/<%= dispute.client_id %>">Open client file</a>
           <a class="btn btn-sm btn-ghost" href="/app/documents">Document vault</a>

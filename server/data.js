@@ -8,13 +8,48 @@ export const getDispute = (tenantId, disputeId) =>
   db
     .prepare(
       `SELECT d.*, c.name AS client_name, c.email AS client_email, c.phone AS client_phone,
-              t.creditor, t.mask, t.type AS tradeline_type, t.balance, t.evidence
+              t.creditor, t.mask, t.type AS tradeline_type, t.balance,
+              t.evidence AS tradeline_evidence, t.evidence,
+              COALESCE((SELECT json_group_array(doc.name)
+                        FROM document_disputes dd JOIN documents doc ON doc.id = dd.document_id
+                        WHERE dd.dispute_id = d.id AND dd.detached_at IS NULL), '[]') AS document_evidence
        FROM disputes d
        JOIN clients c ON c.id = d.client_id
        LEFT JOIN tradelines t ON t.id = d.tradeline_id
        WHERE d.id = ? AND d.tenant_id = ?`
     )
     .get(Number(disputeId), tenantId);
+
+/**
+ * What the letter should list under Enclosures.
+ *
+ * The tradeline's evidence notes come first (they existed before documents were
+ * linked), then the papers actually attached to the dispute. A document whose
+ * name already answers an evidence note — "Toyota payment history.pdf" behind
+ * "Payment history" — is not listed twice.
+ */
+export function letterEvidence(dispute) {
+  const parse = (value) => {
+    try {
+      const list = JSON.parse(value || "[]");
+      return Array.isArray(list) ? list.map((item) => String(item).trim()).filter(Boolean) : [];
+    } catch {
+      return [];
+    }
+  };
+  const evidence = parse(dispute?.tradeline_evidence ?? dispute?.evidence);
+  const covered = (label) =>
+    evidence.some((item) => {
+      const a = item.toLowerCase();
+      const b = label.toLowerCase();
+      return a.includes(b) || b.includes(a);
+    });
+  for (const name of parse(dispute?.document_evidence)) {
+    const label = name.replace(/\.[a-z0-9]+$/i, "").trim();
+    if (label && !covered(label)) evidence.push(label);
+  }
+  return JSON.stringify(evidence);
+}
 
 export const getDocument = (tenantId, documentId) =>
   db.prepare("SELECT * FROM documents WHERE id = ? AND tenant_id = ?").get(Number(documentId), tenantId);
@@ -72,7 +107,7 @@ export function liveLetterBody(tenant, tenantId, disputeId) {
     type: dispute.tradeline_type || "Collection",
     balance: dispute.balance || 0,
     reason: dispute.issue,
-    evidence: dispute.evidence || "[]"
+    evidence: letterEvidence(dispute)
   };
   return letterText({
     tenant,

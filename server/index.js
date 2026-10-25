@@ -7,6 +7,7 @@ import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
 import { db, ensurePlatformAdmin, seedDemo, tenantForHost, tenantStats } from "./db.js";
 import { ensureDemoDocumentFiles } from "./demo-files.js";
+import { backfillEvidenceLinks } from "./evidence.js";
 import { aiConfigured, aiLabel } from "./ai.js";
 import { mailStatus, retryPending } from "./mail.js";
 import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass, trackingUrl } from "./util.js";
@@ -35,6 +36,11 @@ if (process.env.SEED_DEMO !== "0") {
 // the vault's preview and download work instead of returning 404.
 const demoFiles = ensureDemoDocumentFiles();
 if (demoFiles) console.log(`Clearpath: wrote ${demoFiles} demonstration document file(s)`);
+
+// Documents seeded (or uploaded before links existed) are attached to the
+// disputes they name. Cheap enough to reconcile on every boot.
+const evidenceLinks = backfillEvidenceLinks();
+if (evidenceLinks) console.log(`Clearpath: attached ${evidenceLinks} document(s) to disputes as evidence`);
 
 if (stripeConfigured()) {
   console.log(`Clearpath: Stripe billing enabled in ${stripeMode()} mode`);

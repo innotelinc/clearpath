@@ -780,6 +780,96 @@ test("a document is opened for review before it can be verified", async () => {
   assert.equal(after.status, "Verified");
 });
 
+test("a document in the vault attaches itself to the dispute it names", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const doc = inspect.prepare("SELECT * FROM documents WHERE name = 'Toyota payment history.pdf'").get();
+  const dispute = inspect.prepare("SELECT * FROM disputes WHERE account LIKE 'Toyota%'").get();
+  assert.ok(doc, "the seed should have a Toyota payment history");
+  assert.ok(dispute, "the seed should have a Toyota dispute");
+
+  const link = inspect
+    .prepare("SELECT * FROM document_disputes WHERE dispute_id = ? AND document_id = ? AND detached_at IS NULL")
+    .get(dispute.id, doc.id);
+  assert.ok(link, "the document should be linked to the dispute at boot");
+  assert.equal(link.source, "auto");
+
+  const page = await http(`/app/disputes/${dispute.id}`, { jar });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /Evidence on file/);
+  assert.match(page.body, new RegExp(`/app/documents/${doc.id}\\?from=client`), "the attached paper should link to the vault");
+  assert.match(page.body, /Toyota payment history\.pdf/);
+  assert.match(page.body, /attached automatically/);
+  assert.match(page.body, /Toyota payment history/, "the letter should enclose the attached paper");
+
+  const pdf = await http(`/app/disputes/${dispute.id}/letter.pdf`, { jar, binary: true });
+  assert.equal(pdf.status, 200);
+  assert.match(pdf.body.subarray(0, 5).toString("latin1"), /^%PDF-/);
+});
+
+test("evidence can be detached and attached by hand", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const csrf = () => jar.get("cp_csrf");
+  const doc = inspect.prepare("SELECT * FROM documents WHERE name = 'Toyota payment history.pdf'").get();
+  const dispute = inspect.prepare("SELECT * FROM disputes WHERE account LIKE 'Toyota%'").get();
+
+  const detached = await http(`/app/disputes/${dispute.id}/evidence/${doc.id}/detach`, {
+    method: "POST",
+    jar,
+    form: { _csrf: csrf() }
+  });
+  assert.equal(detached.status, 303);
+  const row = inspect
+    .prepare("SELECT detached_at FROM document_disputes WHERE dispute_id = ? AND document_id = ?")
+    .get(dispute.id, doc.id);
+  assert.ok(row.detached_at, "the detachment should be recorded so a restart respects it");
+  const without = await http(`/app/disputes/${dispute.id}`, { jar });
+  assert.doesNotMatch(
+    without.body,
+    new RegExp(`/app/documents/${doc.id}\\?from=client`),
+    "the detached paper should leave the evidence table (it may still be in the attach picker)"
+  );
+
+  const attached = await http(`/app/disputes/${dispute.id}/evidence`, {
+    method: "POST",
+    jar,
+    form: { _csrf: csrf(), document_id: String(doc.id) }
+  });
+  assert.equal(attached.status, 303);
+  const withDoc = await http(`/app/disputes/${dispute.id}`, { jar });
+  assert.match(withDoc.body, /Toyota payment history\.pdf/);
+  const revived = inspect
+    .prepare("SELECT detached_at, source FROM document_disputes WHERE dispute_id = ? AND document_id = ?")
+    .get(dispute.id, doc.id);
+  assert.equal(revived.detached_at, null);
+  assert.equal(revived.source, "manual");
+});
+
+test("a document with no stored file is generated on demand", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const doc = inspect.prepare("SELECT * FROM documents ORDER BY id DESC LIMIT 1").get();
+  assert.ok(doc, "the seed should have a document to test with");
+
+  // The shape of a seeded record before any file was written, or of a row whose
+  // file was lost with the uploads directory.
+  if (doc.stored_name) fs.rmSync(path.join(dataDir, "uploads", path.basename(doc.stored_name)), { force: true });
+  inspect.prepare("UPDATE documents SET stored_name = NULL WHERE id = ?").run(doc.id);
+
+  const review = await http(`/app/documents/${doc.id}`, { jar });
+  assert.equal(review.status, 200);
+
+  const inline = await http(`/app/documents/${doc.id}/file`, { jar, binary: true });
+  assert.equal(inline.status, 200, "the preview should generate the missing file");
+  assert.equal(inline.type, "application/pdf");
+  assert.match(inline.body.subarray(0, 5).toString("latin1"), /^%PDF-/);
+
+  const regenerated = inspect.prepare("SELECT stored_name FROM documents WHERE id = ?").get(doc.id);
+  assert.ok(regenerated.stored_name, "the row should point at the generated file");
+  assert.ok(fs.existsSync(path.join(dataDir, "uploads", regenerated.stored_name)));
+
+  const download = await http(`/app/documents/${doc.id}/download`, { jar });
+  assert.equal(download.status, 200);
+});
+
 /** A tiny SMTP server: enough for nodemailer to authenticate and hand over a message. */
 function startSmtpStub() {
   const messages = [];

@@ -148,6 +148,20 @@ CREATE TABLE IF NOT EXISTS documents (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+/* Which documents support which dispute. Rows are written automatically when
+   a document in the client's vault names the disputed creditor, and can be
+   attached or detached by hand. detached_at keeps a detachment sticky: the
+   boot-time backfill will not re-attach a row that was deliberately removed. */
+CREATE TABLE IF NOT EXISTS document_disputes (
+  tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  dispute_id INTEGER NOT NULL REFERENCES disputes(id) ON DELETE CASCADE,
+  source TEXT NOT NULL DEFAULT 'auto',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  detached_at TEXT,
+  PRIMARY KEY (document_id, dispute_id)
+);
+
 CREATE TABLE IF NOT EXISTS doc_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -357,6 +371,8 @@ CREATE TABLE IF NOT EXISTS case_insights (
 CREATE INDEX IF NOT EXISTS idx_clients_tenant ON clients (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_disputes_tenant ON disputes (tenant_id, status);
 CREATE INDEX IF NOT EXISTS idx_documents_tenant ON documents (tenant_id, client_id);
+CREATE INDEX IF NOT EXISTS idx_document_disputes_dispute ON document_disputes (tenant_id, dispute_id);
+CREATE INDEX IF NOT EXISTS idx_document_disputes_document ON document_disputes (document_id);
 CREATE INDEX IF NOT EXISTS idx_messages_client ON messages (client_id);
 CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log (tenant_id, seq);
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions (expires_at);
@@ -788,12 +804,12 @@ export function seedDemo() {
   const amara2 = addTradeline(denovo, amara, "eq", "Portfolio Recovery", "7742", "Collection", 892, "Nov 2023", "Same debt reported twice by two collectors", 91, ["Credit report excerpt"]);
   const amara3 = addTradeline(denovo, amara, "tu", "Kroll", "0000", "Hard inquiry", 0, "Jan 2026", "No permissible purpose for this inquiry", 76, []);
   addTradeline(denovo, devon, "tu", "Santander", "6620", "Repossession", 0, "Jun 2022", "Vehicle sold — balance after sale misreported", 78, ["Sale receipt"]);
-  addTradeline(denovo, devon, "eq", "Chase", "1150", "Late payment", 0, "Oct 2024", "Late marker applied after payment reversal", 86, ["Statement"]);
-  addTradeline(denovo, priya, "ex", "Northside Medical", "0412", "Collection", 412, "Dec 2024", "Paid by insurance — should not be reported", 92, ["Insurance EOB"]);
+  const devon2 = addTradeline(denovo, devon, "eq", "Chase", "1150", "Late payment", 0, "Oct 2024", "Late marker applied after payment reversal", 86, ["Statement"]);
+  const priya1 = addTradeline(denovo, priya, "ex", "Northside Medical", "0412", "Collection", 412, "Dec 2024", "Paid by insurance — should not be reported", 92, ["Insurance EOB"]);
   addTradeline(denovo, priya, "eq", "Verizon", "5521", "Collection", 268, "Feb 2025", "Equipment returned — account closed in good standing", 73, ["Return receipt"]);
-  addTradeline(denovo, sofia, "ex", "Portfolio Recovery", "3391", "Collection", 1104, "Apr 2024", "Account does not belong to this consumer", 89, ["Identity theft affidavit"]);
+  const sofia1 = addTradeline(denovo, sofia, "ex", "Portfolio Recovery", "3391", "Collection", 1104, "Apr 2024", "Account does not belong to this consumer", 89, ["Identity theft affidavit"]);
   addTradeline(denovo, sofia, "tu", "Capital One", "2277", "Late payment", 0, "Nov 2025", "Goodwill adjustment requested", 67, []);
-  addTradeline(denovo, hannah, "eq", "Toyota Financial", "8820", "Late payment", 0, "Mar 2025", "30-day late reported twice for the same month", 87, ["Payment history"]);
+  const hannah1 = addTradeline(denovo, hannah, "eq", "Toyota Financial", "8820", "Late payment", 0, "Mar 2025", "30-day late reported twice for the same month", 87, ["Payment history"]);
   const northTradeline = addTradeline(northstar, northClient, "ex", "Synchrony", "4410", "Charge-off", 0, "Feb 2023", "Paid in full — balance and status not updated", 90, ["Payoff letter"]);
 
   const insertDispute = db.prepare(
@@ -810,11 +826,11 @@ export function seedDemo() {
   addDispute(denovo, amara, amara2, "DSP-1050", "eq", "Portfolio Recovery ••7742", "Duplicate collection", 1, "Queued", 91, null, null);
   addDispute(denovo, amara, amara3, "DSP-1048", "tu", "Kroll ••0000", "No permissible purpose", 1, "Escalated", 76, "Oct 2", "Nov 1");
   addDispute(denovo, devon, null, "DSP-1051", "tu", "Santander ••6620", "Balance after sale misreported", 1, "Needs review", 78, null, null);
-  addDispute(denovo, devon, null, "DSP-1053", "ex", "Chase ••1150", "Late payment reported in error", 1, "Awaiting response", 88, "Oct 12", "Nov 10");
-  addDispute(denovo, priya, null, "DSP-1052", "ex", "Northside Medical ••0412", "Paid by insurance", 2, "Needs review", 92, null, null);
-  addDispute(denovo, sofia, null, "DSP-1049", "ex", "Portfolio Recovery ••3391", "Not my account", 1, "Needs review", 89, null, null);
+  addDispute(denovo, devon, devon2, "DSP-1053", "ex", "Chase ••1150", "Late payment reported in error", 1, "Awaiting response", 88, "Oct 12", "Nov 10");
+  addDispute(denovo, priya, priya1, "DSP-1052", "ex", "Northside Medical ••0412", "Paid by insurance", 2, "Needs review", 92, null, null);
+  addDispute(denovo, sofia, sofia1, "DSP-1049", "ex", "Portfolio Recovery ••3391", "Not my account", 1, "Needs review", 89, null, null);
   addDispute(denovo, sofia, null, "DSP-1042", "tu", "Capital One ••2277", "Goodwill adjustment", 1, "Needs review", 67, null, null);
-  addDispute(denovo, hannah, null, "DSP-1047", "eq", "Toyota Financial ••8820", "Duplicate late mark", 1, "Awaiting response", 87, "Oct 8", "Nov 6");
+  addDispute(denovo, hannah, hannah1, "DSP-1047", "eq", "Toyota Financial ••8820", "Duplicate late mark", 1, "Queued", 87, null, null);
   addDispute(northstar, northClient, northTradeline, "DSP-2001", "ex", "Synchrony ••4410", "Paid in full, not updated", 1, "Awaiting response", 90, "Oct 10", "Nov 8");
 
   const insertPackage = db.prepare(
@@ -828,6 +844,28 @@ export function seedDemo() {
     [northstar, northClient, "PKG-3001", "ex", 1, "Certified", "In transit", "9405 5118 9956 0000 0000 88", "Oct 26", 9.85, "Oct 18"]
   ].forEach((row) => insertPackage.run(...row));
 
+  // The seeded packages say how many letters they carry; link the actual
+  // disputes so the mailroom can show them, and so a "Ready" package really
+  // has a letter waiting to be posted.
+  const packageItem = db.prepare("INSERT OR IGNORE INTO package_items (package_id, dispute_id) VALUES (?, ?)");
+  const packageId = (ref) => db.prepare("SELECT id FROM packages WHERE tenant_id = ? AND ref = ?").get(denovo, ref)?.id;
+  const disputeId = (ref) => db.prepare("SELECT id FROM disputes WHERE tenant_id = ? AND ref = ?").get(denovo, ref)?.id;
+  for (const [packageRef, disputeRefs] of [
+    ["PKG-2091", ["DSP-1054", "DSP-1048"]],
+    ["PKG-2089", ["DSP-1053"]],
+    ["PKG-2087", ["DSP-1047"]]
+  ]) {
+    const id = packageId(packageRef);
+    if (!id) continue;
+    disputeRefs.forEach((ref) => {
+      const linked = disputeId(ref);
+      if (linked) packageItem.run(id, linked);
+    });
+  }
+  const northPackage = packageId("PKG-3001");
+  const northDispute = db.prepare("SELECT id FROM disputes WHERE tenant_id = ? AND ref = 'DSP-2001'").get(northstar)?.id;
+  if (northPackage && northDispute) packageItem.run(northPackage, northDispute);
+
   const insertDocument = db.prepare(
     `INSERT INTO documents (tenant_id, client_id, ref, name, type, status, size, sha256, uploaded_by, uploaded_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -838,7 +876,13 @@ export function seedDemo() {
     [denovo, priya, "DOC-3301", "Lease agreement.pdf", "Identity", "Pending review", "2.1 MB", "aa025b…5b71", "client", "Oct 21, 2026"],
     [denovo, devon, "DOC-3304", "Police report — identity theft.pdf", "Evidence", "Verified", "1.8 MB", "33ab8e…8e2f", "agency", "Oct 9, 2026"],
     [denovo, hannah, "DOC-3306", "Toyota payment history.pdf", "Evidence", "Verified", "890 KB", "e1a744…44b0", "agency", "Oct 16, 2026"],
-    [northstar, northClient, "DOC-4001", "Synchrony payoff letter.pdf", "Evidence", "Verified", "310 KB", "9910aa…e210", "client", "Oct 12, 2026"]
+    [northstar, northClient, "DOC-4001", "Synchrony payoff letter.pdf", "Evidence", "Verified", "310 KB", "9910aa…e210", "client", "Oct 12, 2026"],
+    // One document behind each seeded dispute, so the automatic attachment has
+    // something to find on a fresh install and the letters enclose real papers.
+    [denovo, amara, "DOC-3311", "Identity theft affidavit — Jefferson Capital.pdf", "Evidence", "Verified", "740 KB", "5d0c81…a7f4", "client", "Oct 20, 2026"],
+    [denovo, priya, "DOC-3312", "Northside Medical EOB.pdf", "Evidence", "Verified", "265 KB", "94e3b2…11c8", "client", "Oct 22, 2026"],
+    [denovo, sofia, "DOC-3313", "Identity theft affidavit — Portfolio Recovery.pdf", "Evidence", "Verified", "690 KB", "0b7fa1…c9d2", "client", "Oct 19, 2026"],
+    [denovo, devon, "DOC-3314", "Chase statement — Oct 2024.pdf", "Evidence", "Verified", "520 KB", "c2e590…4b73", "agency", "Oct 11, 2026"]
   ].forEach((row) => insertDocument.run(...row));
 
   const insertRequest = db.prepare(

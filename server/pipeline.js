@@ -17,6 +17,7 @@
  */
 import { audit, db, nextRef } from "./db.js";
 import { getClient } from "./data.js";
+import { autoAttachEvidenceForDispute } from "./evidence.js";
 import { generateDraft } from "./studio.js";
 
 export const EVIDENCE_FLOOR = 75;
@@ -223,6 +224,7 @@ export function approvePipeline(tenant, actor) {
       draft.id,
       tenant.id
     );
+    autoAttachEvidenceForDispute(tenant.id, disputeId);
     createdDisputes.push({ ...draft, dispute_id: disputeId, ref, bureau: tradeline.bureau, client_id: draft.client_id });
   }
 

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import fs from "node:fs";
-import path from "node:path";
-import { DATA_DIR, db, audit, nextDocRef } from "../db.js";
+import { db, audit, nextDocRef } from "../db.js";
 import {
   clientDisputes,
   clientDocuments,
@@ -15,6 +14,8 @@ import {
   getDocument
 } from "../data.js";
 import { sha256, sizeLabel, storeUpload } from "../uploads.js";
+import { ensureDocumentFile } from "../demo-files.js";
+import { autoAttachEvidenceForDocument } from "../evidence.js";
 import { fmtDate } from "../util.js";
 
 const router = Router();
@@ -147,28 +148,33 @@ router.post("/documents", (req, res) => {
   }
   const digest = sha256(req.file.buffer);
   const type = ["Identity", "Evidence", "Bureau response", "Agreement"].includes(req.body.type) ? req.body.type : "Identity";
-  db.prepare(
-    `INSERT INTO documents (tenant_id, client_id, ref, name, type, status, size, sha256, stored_name, uploaded_by, uploaded_at)
-     VALUES (?, ?, ?, ?, ?, 'Pending review', ?, ?, ?, 'client', ?)`
-  ).run(
-    t,
-    client.id,
-    nextDocRef(t),
-    req.file.originalname.slice(0, 180),
-    type,
-    sizeLabel(req.file.size),
-    digest,
-    stored,
-    new Date().toISOString()
+  const documentId = Number(
+    db.prepare(
+      `INSERT INTO documents (tenant_id, client_id, ref, name, type, status, size, sha256, stored_name, uploaded_by, uploaded_at)
+       VALUES (?, ?, ?, ?, ?, 'Pending review', ?, ?, ?, 'client', ?)`
+    ).run(
+      t,
+      client.id,
+      nextDocRef(t),
+      req.file.originalname.slice(0, 180),
+      type,
+      sizeLabel(req.file.size),
+      digest,
+      stored,
+      new Date().toISOString()
+    ).lastInsertRowid
   );
   db.prepare("UPDATE clients SET docs_total = docs_total + 1 WHERE id = ?").run(client.id);
+  const linked = autoAttachEvidenceForDocument(t, documentId);
   const requestId = Number(req.body.request_id);
   if (requestId) {
     db.prepare("UPDATE doc_requests SET done = 1 WHERE id = ? AND client_id = ? AND tenant_id = ?")
       .run(requestId, client.id, t);
   }
   audit(t, client.name, "Uploaded a document from the portal", `${req.file.originalname} · SHA-256 ${digest.slice(0, 12)}`);
-  back(res, "/portal/documents", { notice: "Upload received. Your specialist reviews it within one business day." });
+  back(res, "/portal/documents", {
+    notice: `Upload received. Your specialist reviews it within one business day.${linked ? ` It is attached to ${linked} open dispute${linked === 1 ? "" : "s"}.` : ""}`
+  });
 });
 
 router.get("/documents/:id/download", (req, res) => {
@@ -176,9 +182,8 @@ router.get("/documents/:id/download", (req, res) => {
   if (!client) return;
   const doc = getDocument(req.tenant.id, req.params.id);
   if (!doc || doc.client_id !== client.id) return fail(res, 404, "Document not found", "That document is not on your file.");
-  if (!doc.stored_name) return fail(res, 404, "No file attached", "This record has metadata only.");
-  const file = path.join(DATA_DIR, "uploads", path.basename(doc.stored_name));
-  if (!fs.existsSync(file)) return fail(res, 410, "File missing", "The stored file is no longer available. Ask your specialist to re-upload it.");
+  const file = ensureDocumentFile(req.tenant, doc);
+  if (!file) return fail(res, 410, "File missing", "The stored file is no longer available. Ask your specialist to re-upload it.");
   res.setHeader("Content-Type", "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${doc.name.replace(/[^a-zA-Z0-9_.-]+/g, "-")}"`);
   res.setHeader("Cache-Control", "private, no-store");

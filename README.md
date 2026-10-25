@@ -44,6 +44,7 @@ npm run dev          # restart on change
 npm test             # 45 end-to-end tests against spawned servers
 npm run seed         # seed an empty database, or inspect what exists
 npm run seed -- --reset   # wipe local data and reseed (refuses in production)
+npm run reseed -- --confirm RESEED   # rebuild the demo data, files and evidence links
 ```
 
 ### Demo accounts
@@ -196,7 +197,7 @@ material alongside the reset links already stored there.
 | Drafting studio | Pick a tradeline and a legal basis (§611 reinvestigation, §623 direct dispute, §605 obsolescence, Regulation V), review the evidence signals and confidence, edit the letter, then approve it into a dispute |
 | Billing | Three monthly plans, Stripe Checkout, the billing portal for cards and invoices, live subscription status and a history of what Stripe reported. Owner only |
 | Mailroom | Select approved letters, group one package per client + bureau, price certified/priority/standard postage, print labels and a letter manifest, record tracking, start the 30-day clock — or hand the package to Lob and let it print, post and report delivery. Opening a package shows exactly what was sent — the letter text is frozen at mailing time — and the tracking number links straight to the carrier |
-| Documents | Upload with signature verification and SHA-256 hashing, verify, download, request documents from a client, see what is outstanding |
+| Documents | Upload with signature verification and SHA-256 hashing, verify, download, request documents from a client, see what is outstanding. A document that names a disputed creditor attaches itself to that dispute; attachments can be added or removed from the dispute page |
 | Mail log | Owner-only: every invitation and reset email this workspace produced, delivery status, provider errors, manual retry |
 | Audit | Append-only SHA-256 chained log, chain verification, CSV export |
 | Settings | Branding (name, monogram, accent, tagline, support details, portal name, domain, welcome copy), team invites and password resets, own password change, mail transport status |
@@ -278,7 +279,7 @@ test/             node:test end-to-end suite
 
 ### Data model
 
-`tenants → users / clients → tradelines / disputes / packages / documents / doc_requests / messages`, plus `sessions`, `audit_log`, `leads`, `drafts` (studio output), `password_resets` (hashed, single-use tokens) and `emails` (the outbox). All workspace tables carry `tenant_id`; client records additionally carry `client_id`, and the portal derives that id from the session rather than from the request. Schema changes are applied on boot with additive `ALTER TABLE` migrations, so an existing `clearpath.db` keeps working after an upgrade.
+`tenants → users / clients → tradelines / disputes / packages / documents / doc_requests / messages`, plus `document_disputes` (which paper supports which dispute), `sessions`, `audit_log`, `leads`, `drafts` (studio output), `password_resets` (hashed, single-use tokens) and `emails` (the outbox). All workspace tables carry `tenant_id`; client records additionally carry `client_id`, and the portal derives that id from the session rather than from the request. Schema changes are applied on boot with additive `ALTER TABLE` migrations, so an existing `clearpath.db` keeps working after an upgrade.
 
 ### Security model
 
