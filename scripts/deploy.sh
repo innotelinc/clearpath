@@ -68,10 +68,13 @@ owner_do() {
   if [ "$(id -un)" = "$OWNER" ]; then "$@"; else runuser -u "$OWNER" -- "$@"; fi
 }
 
-if ! git_as rev-parse --verify --quiet "$REF" >/dev/null; then
-  echo "deploy: fetching $REF"
-  git_as fetch --prune origin
-fi
+# Always, not only when the ref is missing: `origin/main` left by the last deploy
+# still resolves, and would quietly deploy the commit that was already there.
+say "fetch origin"
+# Fetched even under --dry-run: it touches only .git, and a plan that names a
+# stale commit is worse than no plan.
+git_as fetch --prune origin
+
 TARGET=$(git_as rev-parse --short "$REF")
 PREVIOUS=$(git_as rev-parse --short HEAD)
 
@@ -107,7 +110,8 @@ if [ -f "$DB" ]; then
   # way to read a live WAL database without stopping the service.
   run owner_do node --input-type=module -e '
     import { DatabaseSync } from "node:sqlite";
-    const [from, to] = process.argv.slice(2);
+    // For `-e` there is no script path in argv, so take the last two either way.
+    const [from, to] = process.argv.slice(-2);
     const db = new DatabaseSync(from);
     db.exec(`VACUUM INTO \x27${to.replace(/\x27/g, "\x27\x27")}\x27`);
     db.close();
@@ -122,7 +126,14 @@ say "move the checkout to $TARGET"
 run git_as reset --hard "$REF"
 
 say "install dependencies"
-run owner_do env HOME="$DIR" npm ci --omit=dev --no-audit --fund=false
+# A `npm ci` run as root — the obvious thing to do when the deploy is broken —
+# leaves root-owned files that the service user cannot remove, and every later
+# install then fails with EACCES. Take them back rather than stop the deploy.
+if [ -d "$DIR/node_modules" ] && [ -n "$(find "$DIR/node_modules" ! -user "$OWNER" -print -quit 2>/dev/null)" ]; then
+  echo "   some of node_modules is not $OWNER's; returning it"
+  run chown -R "$OWNER:$OWNER" "$DIR/node_modules"
+fi
+run owner_do env HOME="$DATA_DIR" npm_config_cache="$DATA_DIR/.npm" npm ci --omit=dev --no-audit --fund=false
 
 say "restart $UNIT"
 run systemctl restart "$UNIT"
@@ -141,7 +152,7 @@ rollback() {
   say "rolling back to $PREVIOUS"
   systemctl restart "$UNIT" >/dev/null 2>&1 || true
   git_as reset --hard "$PREVIOUS" || return 1
-  owner_do env HOME="$DIR" npm ci --omit=dev --no-audit --fund=false || return 1
+  owner_do env HOME="$DATA_DIR" npm_config_cache="$DATA_DIR/.npm" npm ci --omit=dev --no-audit --fund=false || return 1
   systemctl restart "$UNIT" || return 1
   healthy && echo "   back on $PREVIOUS and serving" || echo "   $PREVIOUS is not healthy either — check journalctl -u $UNIT"
 }
