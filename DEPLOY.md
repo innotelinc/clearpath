@@ -116,6 +116,29 @@ POST https://mail.innotel.us/jmap/
 DKIM (`v1-*`), SPF, DMARC, MTA-STS and the SRV records for the domain are already
 published in the zone by Stalwart, so the domain aligns; nothing else to add.
 
+### Per-workspace email server (Settings → Email server)
+
+An agency owner can enter their own SMTP server in the workspace instead of
+editing `.env`. The row lives in `tenant_mail` and takes precedence over
+`SMTP_*` for that workspace only; **Save & send test** mails the signed-in owner
+and records the result in the mail log. The SMTP password is sealed with
+AES-256-GCM using `MAIL_SECRET` when set, otherwise `/var/lib/clearpath/mail.secret`
+(mode 600, generated on first use). Back up that file with the database — without
+it saved passwords cannot be decrypted, and the owner must re-enter them.
+
+Environment keys still apply to workspaces with no row of their own (and to the
+platform console's invitations), so the Stalwart configuration above remains the
+deployment fallback.
+
+## Document review and the vault
+
+The vault no longer verifies a document blind: every row opens at
+`/app/documents/<id>`, which frames the PDF (or shows the image) beside its
+client, SHA-256 and checklist, and only then offers **Verify document**. Seeded
+demo records have no scanned original, so on boot `server/demo-files.js` writes a
+demonstration PDF into `uploads/` for each one, labelled as such; a real upload
+replaces it. Downloads stream the same file with its true content type.
+
 ## AI gateway
 
 `OMNIROUTE_BASE_URL=http://192.168.1.71:20128/v1` with the OmniRoute key named
@@ -148,8 +171,14 @@ which is skipped when both platform variables are set).
 - Landing page: client sign-in in the header, agency sign-in in the footer, phone/fax/ET in both the contact block and the footer.
 - Owner sign-in over the public URL; `/app`, `/app/clients`, `/app/mailroom`,
   `/app/mail-log`, `/app/studio`, `/app/settings`, `/app/billing` all 200.
-- Settings → Email delivery reads `smtp`, `mail.innotel.us:465 · implicit TLS`,
-  `SMTP AUTH as clearpath@denovocredit.com`.
+- Settings → Email server reads `smtp`, `mail.innotel.us:465 · implicit TLS`,
+  `SMTP AUTH as clearpath@denovocredit.com`, and accepts a workspace override
+  (saved row + test message, password sealed in `tenant_mail`).
+- Vault: a seeded document opens for review with its PDF inline, downloads with
+  `Content-Type: application/pdf`, and verifies only from the review page.
+- Client portal: `/portal/packages` lists each mailed package with its tracking
+  number and the frozen letter bodies, and `/portal/disputes/<id>` shows both the
+  generated letter and the sealed copy with the package it travelled in.
 - A message sent through `sendMail()` left the outbox as `status=sent`,
   `provider=smtp`, and arrived in `admin@innotel.us` on the Stalwart node.
 - `incus restart clearpath` → static address, unit enabled and active, local and

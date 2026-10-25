@@ -523,4 +523,53 @@ export function summaryPdf(tenant, client, disputes) {
   return doc.bytes(`Client summary — ${client.name}`);
 }
 
+/**
+ * A stand-in for a document that arrived without a scanned original — used by
+ * the demo seed so the vault can be previewed and downloaded end to end. It
+ * repeats the metadata on file and says plainly that it is not the original.
+ */
+export function documentPdf({ tenant, client, doc }) {
+  const d = new Doc();
+  let top = header(d, tenant, "DOCUMENT ON FILE", doc.ref || "");
+  d.text(doc.name, 54, top + 6, { size: 15, bold: true });
+  d.text(
+    `${doc.type || "Document"} · ${doc.size || ""} · received ${doc.uploaded_at || ""}`,
+    54,
+    top + 30,
+    { size: 9, color: "#667085" }
+  );
+  top += 58;
+
+  const rows = [
+    ["Client", client?.name || "—"],
+    ["Client reference", client?.ref || "—"],
+    ["Document reference", doc.ref || "—"],
+    ["Type", doc.type || "Document"],
+    ["Status", doc.status || "—"],
+    ["Uploaded by", doc.uploaded_by === "client" ? "Client" : "Agency"],
+    ["SHA-256", String(doc.sha256 || "").slice(0, 32)]
+  ];
+  rows.forEach(([label, value], index) => {
+    const y = top + index * 15;
+    if (index % 2 === 0) d.rect(54, y - 2, 504, 15, { fill: "#f8fafc" });
+    d.text(label, 62, y, { size: 8.5, bold: true, color: "#475467" });
+    d.text(value, 200, y, { size: 9 });
+  });
+  top += rows.length * 15 + 26;
+
+  d.text("Demonstration copy", 54, top, { size: 10, bold: true, color: "#344054" });
+  top += 16;
+  d.wrap(
+    "This record was seeded for a demonstration workspace and has no scanned original attached. " +
+      "Upload the real file from the client portal or the agency Documents page to replace this copy.",
+    504,
+    8.5
+  ).forEach((line, index) => {
+    d.text(line, 54, top + index * 12, { size: 8.5, color: "#667085" });
+  });
+
+  footer(d, tenant, `${doc.ref || "Document"} · document record`);
+  return d.bytes(`${doc.name} — ${doc.ref || "document"}`);
+}
+
 export { BUREAUS, bureauName, money };

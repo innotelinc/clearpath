@@ -36,7 +36,10 @@
         <tbody>
           <% open.forEach((d) => { %>
             <tr>
-              <td><strong><%= d.account %></strong><div class="tiny muted mono"><%= d.ref %></div></td>
+              <td>
+                <a href="/portal/disputes/<%= d.id %>"><strong><%= d.account %></strong></a>
+                <div class="tiny muted mono"><%= d.ref %></div>
+              </td>
               <td><%= bureau[d.bureau] ? bureau[d.bureau].name : d.bureau %></td>
               <td class="small"><%= d.issue %></td>
               <td class="num"><%= d.round %></td>

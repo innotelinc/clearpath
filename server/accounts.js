@@ -1,5 +1,5 @@
 import { audit, db } from "./db.js";
-import { sendMail, mailConfigured } from "./mail.js";
+import { sendMail, mailConfiguredFor } from "./mail.js";
 import { hashPassword, randomToken, sha256, strongEnough, temporaryPassword } from "./security.js";
 
 const RESET_TTL_MINUTES = 60;
@@ -93,9 +93,9 @@ export function emailDeliveryNote(row) {
   if (!row) return "Email was not queued.";
   if (row.status === "sent") return `Emailed to ${row.to_email}.`;
   if (row.status === "failed") return `Email to ${row.to_email} failed — open Mail log to retry.`;
-  return mailConfigured
+  return mailConfiguredFor(row.tenant_id)
     ? `Queued for ${row.to_email}.`
-    : `Stored in the Mail log for ${row.to_email} — no mail provider is configured yet.`;
+    : `Stored in the Mail log for ${row.to_email} — no mail server is configured for this workspace yet.`;
 }
 
 function firstName(name) {

@@ -1,0 +1,86 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1><%= dispute.account %></h1>
+    <p>
+      <%= dispute.ref %> · <%= bureau[dispute.bureau] ? bureau[dispute.bureau].name : dispute.bureau %> ·
+      round <%= dispute.round %>
+    </p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/portal/disputes">All disputes</a>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-head">
+    <div><h2>This dispute</h2><p>What we are challenging and where it stands</p></div>
+    <span class="badge <%= statusClass(dispute.status) %>"><%= dispute.status %></span>
+  </div>
+  <div class="card-body">
+    <div class="kv">
+      <div><span class="k">Reason</span><span class="v"><%= dispute.issue %></span></div>
+      <div><span class="k">Mailed</span><span class="v"><%= dispute.mailed || "Not yet" %></span></div>
+      <div><span class="k">Response due</span><span class="v"><%= dispute.due || "—" %></span></div>
+      <div><span class="k">Evidence strength</span><span class="v"><%= dispute.confidence %>%</span></div>
+    </div>
+  </div>
+</section>
+
+<% if (sentLetter) { %>
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>The letter we sent</h2>
+        <p>Exactly as it was sealed and posted — reference <%= sentLetter.ref %></p>
+      </div>
+    </div>
+    <div class="card-body">
+      <pre style="white-space:pre-wrap;font-family:var(--mono,ui-monospace,monospace);font-size:12.5px;line-height:1.6;margin:0"><%= sentLetter.body %></pre>
+      <p class="tiny muted" style="margin-top:12px">
+        Captured when the package was posted, <%= fmtDateTime(sentLetter.captured_at) %>.
+        <% if (sentLetter.package_ref) { %>
+          Carried in <a href="/portal/packages"><%= sentLetter.package_ref %></a>
+          <%= sentLetter.package_method ? `by ${sentLetter.package_method}` : "" %>
+          <% if (sentLetter.package_tracking) { %>· tracking <%= sentLetter.package_tracking %><% } %>.
+        <% } %>
+      </p>
+    </div>
+  </section>
+<% } else if (dispute.letter_body) { %>
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>The letter we generated</h2>
+        <p>Written for this account and waiting to be mailed</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <pre style="white-space:pre-wrap;font-family:var(--mono,ui-monospace,monospace);font-size:12.5px;line-height:1.6;margin:0"><%= dispute.letter_body %></pre>
+      <p class="tiny muted" style="margin-top:12px">
+        Once the package is posted, the sealed copy replaces this draft and stays here unchanged.
+      </p>
+    </div>
+  </section>
+<% } else { %>
+  <section class="card">
+    <div class="empty">
+      <h3>The letter is being prepared</h3>
+      <p>Your specialist has not generated this letter yet. It appears here as soon as it is written,
+         and again as the sealed copy once it is mailed.</p>
+    </div>
+  </section>
+<% } %>
+
+<div class="notice notice-info">
+  <svg><use href="#i-clock"/></svg>
+  <div>
+    The bureau has <strong>30 days</strong> from receipt to answer. We post the outcome here, and your
+    specialist follows up if the deadline passes without one.
+  </div>
+</div>
+
+<%- include("../partials/portal-foot") %>

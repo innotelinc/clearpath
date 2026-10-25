@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
 import { db, ensurePlatformAdmin, seedDemo, tenantForHost, tenantStats } from "./db.js";
+import { ensureDemoDocumentFiles } from "./demo-files.js";
 import { aiConfigured, aiLabel } from "./ai.js";
 import { mailStatus, retryPending } from "./mail.js";
 import { bureau, fmtDate, fmtDateTime, fmtDay, initials, money, product, stageClass, statusClass, trackingUrl } from "./util.js";
@@ -16,6 +17,8 @@ import platformRoutes from "./routes/platform.js";
 import lobWebhookRoutes from "./routes/lob-webhook.js";
 import stripeWebhookRoutes from "./routes/stripe-webhook.js";
 import billingRoutes from "./routes/billing.js";
+import ssoRoutes from "./routes/sso.js";
+import { adminGroup, ssoConfigured } from "./oidc.js";
 import { lobConfigured, lobMode, lobWebhookSecret } from "./lob.js";
 import { billingSummary, stripeConfigured, stripeMode, stripeWebhookSecret } from "./billing.js";
 
@@ -26,6 +29,11 @@ if (process.env.SEED_DEMO !== "0") {
   const seeded = seedDemo();
   if (seeded) console.log("Clearpath: seeded demo tenants and records");
 }
+
+// Seeded documents have metadata but no file; give them a demonstration PDF so
+// the vault's preview and download work instead of returning 404.
+const demoFiles = ensureDemoDocumentFiles();
+if (demoFiles) console.log(`Clearpath: wrote ${demoFiles} demonstration document file(s)`);
 
 if (stripeConfigured()) {
   console.log(`Clearpath: Stripe billing enabled in ${stripeMode()} mode`);
@@ -46,6 +54,10 @@ if (mail.configured) {
   console.log(
     `Clearpath: mail delivery via ${mail.transport}${mail.server ? ` — ${mail.server} · ${mail.security} · ${mail.auth}` : ""}`
   );
+}
+
+if (ssoConfigured()) {
+  console.log(`Clearpath: Authentik operator sign-in enabled — group ${adminGroup()} at /platform/login`);
 }
 
 const platformAdmin = ensurePlatformAdmin();
@@ -134,6 +146,8 @@ app.use((req, res, next) => {
   res.locals.demoMode = process.env.SEED_DEMO !== "0";
   res.locals.aiConfigured = aiConfigured;
   res.locals.aiLabel = aiLabel();
+  res.locals.ssoEnabled = ssoConfigured();
+  res.locals.ssoGroup = adminGroup();
   res.locals.billing =
     res.locals.tenant && res.locals.user && res.locals.user.role !== "client"
       ? billingSummary(res.locals.tenant)
@@ -152,6 +166,9 @@ app.use(["/app/documents", "/portal/documents"], upload.single("file"));
 app.use(checkCsrf);
 
 app.use("/platform", platformRoutes);
+// Federated operator sign-in. Mounted before the marketing/auth routes so
+// /auth/authentik is not shadowed by anything else.
+app.use("/", ssoRoutes);
 app.use("/", publicRoutes);
 app.use("/", authRoutes);
 // Billing is owner-only, so it is mounted ahead of the workspace routes.

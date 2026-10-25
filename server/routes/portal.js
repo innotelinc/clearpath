@@ -6,9 +6,12 @@ import {
   clientDisputes,
   clientDocuments,
   clientMessages,
+  clientPackageLetters,
   clientPackages,
   clientRequests,
+  clientSentLetter,
   getClient,
+  getDispute,
   getDocument
 } from "../data.js";
 import { sha256, sizeLabel, storeUpload } from "../uploads.js";
@@ -80,6 +83,41 @@ router.get("/disputes", (req, res) => {
     page: "disputes",
     ...data,
     open: data.disputes.filter((d) => !["Deleted", "Closed"].includes(d.status))
+  });
+});
+
+router.get("/packages", (req, res) => {
+  const client = loadClient(req, res);
+  if (!client) return;
+  const t = req.tenant.id;
+  const packages = clientPackages(t, client.id);
+  const letters = clientPackageLetters(t, client.id);
+  const byPackage = new Map(packages.map((p) => [p.id, []]));
+  for (const letter of letters) byPackage.get(letter.package_id)?.push(letter);
+  res.render("portal/packages", {
+    title: "Mailings",
+    page: "packages",
+    clientRecord: client,
+    // `letters` on the row is the count the mailroom recorded; the bodies are letterRows.
+    packages: packages.map((p) => ({ ...p, letterRows: byPackage.get(p.id) || [] }))
+  });
+});
+
+router.get("/disputes/:id", (req, res) => {
+  const client = loadClient(req, res);
+  if (!client) return;
+  const t = req.tenant.id;
+  const dispute = getDispute(t, req.params.id);
+  // getDispute spans the tenant; the portal only ever shows the session's client.
+  if (!dispute || dispute.client_id !== client.id) {
+    return fail(res, 404, "Not found", "That dispute is not on your file.");
+  }
+  res.render("portal/dispute", {
+    title: `${dispute.account} · dispute`,
+    page: "disputes",
+    clientRecord: client,
+    dispute,
+    sentLetter: clientSentLetter(t, client.id, dispute.id) || null
   });
 });
 

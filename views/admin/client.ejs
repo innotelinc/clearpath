@@ -311,20 +311,19 @@
           <tbody>
             <% documents.forEach((doc) => { %>
               <tr>
-                <td class="small"><strong><%= doc.name %></strong></td>
+                <td class="small"><a class="link" href="/app/documents/<%= doc.id %>?from=client"><strong><%= doc.name %></strong></a></td>
                 <td class="small"><%= doc.type %></td>
                 <td><span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span></td>
                 <td class="small muted nowrap"><%= doc.size || "—" %></td>
                 <td class="mono muted"><%= String(doc.sha256).slice(0, 12) %>…</td>
                 <td class="nowrap muted small"><%= fmtDate(doc.uploaded_at) %> · <%= doc.uploaded_by %></td>
                 <td class="actions">
-                  <% if (doc.status !== "Verified") { %>
-                    <form method="post" action="/app/documents/<%= doc.id %>/verify" style="display:inline">
-                      <input type="hidden" name="_csrf" value="<%= csrf %>">
-                      <button class="btn btn-sm" type="submit">Verify</button>
-                    </form>
+                  <a class="btn btn-sm<%= doc.status === "Verified" ? " btn-ghost" : "" %>" href="/app/documents/<%= doc.id %>?from=client">
+                    <%= doc.status === "Verified" ? "Open" : "Review" %>
+                  </a>
+                  <% if (doc.stored_name) { %>
+                    <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
                   <% } %>
-                  <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
                 </td>
               </tr>
             <% }) %>

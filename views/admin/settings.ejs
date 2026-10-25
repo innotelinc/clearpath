@@ -176,8 +176,18 @@
       <% } %>
     </section>
 
+    <% const saved = mail.workspace || null; %>
     <section class="card">
-      <div class="card-head"><div><h2>Email delivery</h2><p>Invitations and password resets</p></div></div>
+      <div class="card-head">
+        <div><h2>Email server</h2><p>Invitations, password resets and notices</p></div>
+        <% if (!mail.configured) { %>
+          <span class="badge amber">Not configured</span>
+        <% } else if (mail.source === "workspace") { %>
+          <span class="badge teal">Workspace server</span>
+        <% } else { %>
+          <span class="badge blue">Deployment</span>
+        <% } %>
+      </div>
       <div class="card-body">
         <dl class="def-list">
           <div><dt>Transport</dt><dd class="mono"><%= mail.transport %></dd></div>
@@ -187,21 +197,86 @@
           <% } %>
           <div><dt>From</dt><dd><%= mail.from %></dd></div>
           <div><dt>Waiting</dt><dd><%= queuedMail %> message<%= queuedMail === 1 ? "" : "s" %> in the outbox</dd></div>
+          <% if (saved) { %>
+            <div><dt>Saved server</dt><dd class="mono"><%= saved.host %>:<%= saved.port %><%= saved.enabled ? "" : " · switched off" %></dd></div>
+            <div><dt>Password</dt><dd><%= saved.hasPassword ? "Saved (encrypted)" : "Not set" %></dd></div>
+            <div><dt>Updated</dt><dd class="small"><%= fmtDateTime(saved.updated_at) %><% if (saved.updated_by) { %> by <%= saved.updated_by %><% } %></dd></div>
+          <% } %>
         </dl>
+
         <% if (!mail.configured) { %>
           <div class="notice notice-error" style="margin-top:14px;background:var(--amber-soft);border-color:#f0dcb8;color:#7a4a0d">
             <svg><use href="#i-alert"/></svg>
-            <div>No provider configured. Emails are recorded in the <a href="/app/mail-log">Mail log</a> but not delivered.</div>
+            <div>No mail server is configured. Emails are recorded in the <a href="/app/mail-log">Mail log</a> but not delivered.</div>
           </div>
-          <p class="tiny muted" style="margin-top:10px">
-            Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code> and <code>SMTP_PASS</code>
-            for Stalwart or any SMTP submission server, or <code>RESEND_API_KEY</code> /
-            <code>POSTMARK_TOKEN</code> / <code>SENDGRID_API_KEY</code> (plus <code>MAIL_FROM</code> on an
-            address your provider authorises) and restart the container.
-          </p>
         <% } else { %>
           <p class="tiny muted" style="margin-top:10px">Failed messages retry automatically four times before staying in the log for manual retry.</p>
         <% } %>
+
+        <% if (user.role === "owner") { %>
+          <form class="stack" method="post" action="/app/settings/mail" style="margin-top:16px;padding-top:16px;border-top:1px solid var(--line);gap:12px">
+            <input type="hidden" name="_csrf" value="<%= csrf %>">
+            <strong class="small">Workspace SMTP server</strong>
+            <div class="form-grid">
+              <div class="field span-2">
+                <label for="m-host">Server hostname</label>
+                <input class="input" id="m-host" name="host" value="<%= saved ? saved.host : "" %>" required maxlength="160" placeholder="mail.example.com" autocomplete="off">
+              </div>
+              <div class="field">
+                <label for="m-port">Port</label>
+                <input class="input" id="m-port" name="port" type="number" min="1" max="65535" value="<%= saved ? saved.port : 587 %>" required>
+              </div>
+              <div class="field">
+                <label for="m-security">Security</label>
+                <select class="select" id="m-security" name="security">
+                  <option value="starttls" <%= !saved || saved.starttls ? "selected" : "" %>>STARTTLS (587)</option>
+                  <option value="tls" <%= saved && saved.secure ? "selected" : "" %>>Implicit TLS (465)</option>
+                  <option value="none" <%= saved && !saved.secure && !saved.starttls ? "selected" : "" %>>No TLS — trusted relay only</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="m-user">Username</label>
+                <input class="input" id="m-user" name="username" value="<%= saved ? saved.username : "" %>" maxlength="160" autocomplete="off" placeholder="clearpath@example.com">
+                <span class="hint">Leave blank for a relay that takes no SMTP AUTH.</span>
+              </div>
+              <div class="field">
+                <label for="m-pass">Password</label>
+                <input class="input" id="m-pass" name="password" type="password" autocomplete="new-password" maxlength="200"
+                       placeholder="<%= saved && saved.hasPassword ? "Leave blank to keep the saved password" : "Application password" %>">
+                <span class="hint">Encrypted before it is stored, and never shown again.</span>
+              </div>
+              <div class="field span-2">
+                <label for="m-from">From address</label>
+                <input class="input" id="m-from" name="from" value="<%= saved ? saved.from : "" %>" maxlength="180" placeholder="<%= mail.from %>" autocomplete="off">
+                <span class="hint">Must be an address the server is allowed to send as. Blank uses the deployment default.</span>
+              </div>
+              <div class="field span-2">
+                <label class="row" style="gap:8px;align-items:center;font-weight:500">
+                  <input type="checkbox" name="enabled" value="1" <%= !saved || saved.enabled ? "checked" : "" %>>
+                  Send this workspace's email through this server
+                </label>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-primary" type="submit" name="action" value="save">Save server</button>
+              <button class="btn" type="submit" name="action" value="test">Save &amp; send test</button>
+            </div>
+            <p class="tiny muted">
+              The test message goes to <strong><%= user.email %></strong> and is recorded in the mail log, so a failure tells you
+              exactly what the server said. Use a dedicated mailbox and an application password, not an administrator login.
+            </p>
+          </form>
+          <% if (saved) { %>
+            <form method="post" action="/app/settings/mail/remove" style="margin-top:10px"
+                  data-confirm="Stop using the saved server and fall back to the deployment configuration?">
+              <input type="hidden" name="_csrf" value="<%= csrf %>">
+              <button class="btn btn-sm btn-ghost" type="submit">Remove saved server</button>
+            </form>
+          <% } %>
+        <% } else { %>
+          <p class="tiny muted" style="margin-top:12px">Only an agency owner can change the email server.</p>
+        <% } %>
+
         <a class="btn btn-sm" href="/app/mail-log" style="margin-top:12px">Open mail log</a>
       </div>
     </section>

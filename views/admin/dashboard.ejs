@@ -152,10 +152,7 @@
                 <div class="title truncate"><%= doc.name %></div>
                 <div class="meta"><%= doc.client_name %> · <%= doc.type %> · <%= doc.size || "—" %></div>
               </div>
-              <form method="post" action="/app/documents/<%= doc.id %>/verify">
-                <input type="hidden" name="_csrf" value="<%= csrf %>">
-                <button class="btn btn-sm" type="submit">Verify</button>
-              </form>
+              <a class="btn btn-sm" href="/app/documents/<%= doc.id %>">Review</a>
             </div>
           <% }) %>
         </div>

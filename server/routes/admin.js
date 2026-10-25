@@ -6,7 +6,7 @@ import { aiChat, aiConfigured, parseJsonReply } from "../ai.js";
 import { approvePipeline, runPipeline, scanPipeline } from "../pipeline.js";
 import { hashPassword, verifyPassword, strongEnough } from "../security.js";
 import { createAccount, emailDeliveryNote, sendCredentials, sendResetLink } from "../accounts.js";
-import { deliver, mailConfigured, mailStatus } from "../mail.js";
+import { clearMailSettings, deliver, mailConfiguredFor, mailStatus, saveMailSettings, sendMail } from "../mail.js";
 import { STRATEGIES, TONES, generateDraft, getDraft, listDrafts, parseList } from "../studio.js";
 import { BUREAUS, letterPdf, letterText, labelsPdf, queuePdf } from "../pdf.js";
 import { createCertifiedLetter, lobConfigured, lobMode, parseAddress } from "../lob.js";
@@ -33,6 +33,7 @@ function fail(res, status, title, message) {
 }
 
 const STATUSES = ["Needs review", "Queued", "Mailed", "Awaiting response", "Escalated", "Deleted", "Closed"];
+const truthy = (value) => /^(1|true|yes|on)$/i.test(String(value || ""));
 
 /** Freeze the exact printed text of the letters in a package. */
 function captureLetters(tenant, pkg, letterIds, t) {
@@ -198,7 +199,7 @@ router.post("/clients/:id/invite", async (req, res) => {
   }
 
   renderClient(req, res, client, {
-    invite: { email: client.email, password: mailConfigured ? null : password, delivery }
+    invite: { email: client.email, password: mailConfiguredFor(t) ? null : password, delivery }
   });
 });
 
@@ -674,25 +675,79 @@ router.post("/documents", (req, res) => {
   back(res, "/app/documents", { notice: `${req.file.originalname} uploaded · SHA-256 ${digest.slice(0, 12)}…` });
 });
 
+/** Openable types, so a preview can be served with the browser's own viewer. */
+const DOC_TYPES = {
+  pdf: "application/pdf",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  heic: "image/heic",
+  heif: "image/heif"
+};
+
+function documentFile(doc) {
+  if (!doc?.stored_name) return null;
+  const file = path.join(DATA_DIR, "uploads", path.basename(doc.stored_name));
+  return fs.existsSync(file) ? file : null;
+}
+
+/** Review one document: the file itself, its metadata, and the verify action. */
+router.get("/documents/:id", (req, res) => {
+  const t = tenantId(req);
+  const doc = getDocument(t, req.params.id);
+  if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
+  const file = documentFile(doc);
+  const ext = file ? path.extname(file).slice(1).toLowerCase() : "";
+  res.render("admin/document", {
+    title: doc.name,
+    page: "documents",
+    doc,
+    documentClient: getClient(t, doc.client_id),
+    hasFile: Boolean(file),
+    previewKind: DOC_TYPES[ext] ? ext : "",
+    backTo: String(req.query.from || "") === "client" && doc.client_id ? `/app/clients/${doc.client_id}` : "/app/documents"
+  });
+});
+
+/** Inline copy for the review page. Same origin only, never cached. */
+router.get("/documents/:id/file", (req, res) => {
+  const t = tenantId(req);
+  const doc = getDocument(t, req.params.id);
+  if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
+  const file = documentFile(doc);
+  if (!file) return fail(res, 404, "No file attached", "This record has metadata only. Upload the file to replace it.");
+  const ext = path.extname(file).slice(1).toLowerCase();
+  res.setHeader("Content-Type", DOC_TYPES[ext] || "application/octet-stream");
+  res.setHeader("Content-Disposition", `inline; filename="${doc.name.replace(/[^a-zA-Z0-9_.-]+/g, "-")}"`);
+  res.setHeader("Cache-Control", "private, no-store");
+  // The review page frames this response; everything else keeps the DENY default.
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  fs.createReadStream(file).pipe(res);
+});
+
 router.post("/documents/:id/verify", (req, res) => {
   const t = tenantId(req);
   const doc = getDocument(t, req.params.id);
   if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
+  const target = String(req.body.return || "") === "review" ? `/app/documents/${doc.id}` : "/app/documents";
+  if (doc.status === "Verified") return back(res, target, { notice: `${doc.name} is already verified.` });
   db.prepare("UPDATE documents SET status = 'Verified' WHERE id = ? AND tenant_id = ?").run(doc.id, t);
   const client = getClient(t, doc.client_id);
   if (client) db.prepare("UPDATE clients SET docs_verified = MIN(docs_total, docs_verified + 1) WHERE id = ?").run(client.id);
   audit(t, actor(req), "Verified document", doc.name);
-  back(res, "/app/documents", { notice: `${doc.name} verified.` });
+  back(res, target, { notice: `${doc.name} verified.` });
 });
 
 router.get("/documents/:id/download", (req, res) => {
   const t = tenantId(req);
   const doc = getDocument(t, req.params.id);
   if (!doc) return fail(res, 404, "Document not found", "That document is not in this workspace.");
-  if (!doc.stored_name) return fail(res, 404, "No file attached", "This seeded record has metadata only. Upload a file to download it.");
-  const file = path.join(DATA_DIR, "uploads", path.basename(doc.stored_name));
-  if (!fs.existsSync(file)) return fail(res, 410, "File missing", "The stored file is no longer on this server.");
-  res.setHeader("Content-Type", "application/octet-stream");
+  const file = documentFile(doc);
+  if (!file) {
+    return fail(res, 404, "No file attached", "This record has metadata only, so there is nothing to download yet. Open it to review the details.");
+  }
+  const ext = path.extname(file).slice(1).toLowerCase();
+  res.setHeader("Content-Type", ext === "heic" || ext === "heif" ? "application/octet-stream" : DOC_TYPES[ext] || "application/octet-stream");
   res.setHeader("Content-Disposition", `attachment; filename="${doc.name.replace(/[^a-zA-Z0-9_.-]+/g, "-")}"`);
   res.setHeader("Cache-Control", "private, no-store");
   fs.createReadStream(file).pipe(res);
@@ -1107,7 +1162,7 @@ router.get("/mail-log", (req, res) => {
     title: "Mail log",
     page: "mail-log",
     emails: emailRows(tenantId(req), 100),
-    mail: mailStatus()
+    mail: mailStatus(tenantId(req))
   });
 });
 
@@ -1118,9 +1173,9 @@ router.post("/mail-log/:id/retry", async (req, res) => {
   if (!row) return fail(res, 404, "Message not found", "That message is not in this workspace.");
   const after = await deliver(row.id);
   if (after.status === "sent") return back(res, "/app/mail-log", { notice: `Message to ${after.to_email} accepted by ${after.provider}.` });
-  if (!mailConfigured) {
+  if (!mailConfiguredFor(t)) {
     return back(res, "/app/mail-log", {
-      error: "No mail provider is configured, so the message stays in this log. Set SMTP_HOST/SMTP_USER/SMTP_PASS (or RESEND_API_KEY / POSTMARK_TOKEN / SENDGRID_API_KEY) and restart."
+      error: "No mail server is configured for this workspace, so the message stays in this log. Set one in Settings → Email server, or configure SMTP_HOST/SMTP_USER/SMTP_PASS in the environment and restart."
     });
   }
   back(res, "/app/mail-log", { error: `Still failing: ${after.error || "provider rejected the message"}` });
@@ -1141,7 +1196,7 @@ router.get("/settings", (req, res) => {
     page: "settings",
     team,
     invited: null,
-    mail: mailStatus(),
+    mail: mailStatus(t),
     queuedMail: queued,
     saved: req.query.notice || ""
   });
@@ -1205,11 +1260,94 @@ router.post("/settings/team", async (req, res) => {
     title: "Settings",
     page: "settings",
     team,
-    invited: { name, email, role, password: mailConfigured ? null : password, delivery },
-    mail: mailStatus(),
+    invited: { name, email, role, password: mailConfiguredFor(t) ? null : password, delivery },
+    mail: mailStatus(t),
     queuedMail: 0,
     saved: ""
   });
+});
+
+/* ---------------- workspace email server ---------------- */
+
+/** Pull the address out of either `name@domain` or `Name <name@domain>`. */
+function mailAddress(value) {
+  const text = String(value || "").trim();
+  const angled = text.match(/<([^<>]+)>/);
+  return (angled ? angled[1] : text).trim().toLowerCase();
+}
+
+router.post("/settings/mail", async (req, res) => {
+  const t = tenantId(req);
+  if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can change the email server.");
+
+  const host = String(req.body.host || "").trim().slice(0, 160);
+  const port = Number(req.body.port || 0);
+  const security = String(req.body.security || "starttls");
+  const username = String(req.body.username || "").trim().slice(0, 160);
+  const password = String(req.body.password || "");
+  const fromRaw = String(req.body.from || "").trim().slice(0, 180);
+  const from = mailAddress(fromRaw);
+  const enabled = truthy(req.body.enabled);
+
+  if (!host) return back(res, "/app/settings", { error: "Enter the SMTP server hostname." });
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return back(res, "/app/settings", { error: "The SMTP port must be a number between 1 and 65535." });
+  }
+  if (from && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(from)) {
+    return back(res, "/app/settings", { error: "The From address must be a valid email address." });
+  }
+
+  saveMailSettings({
+    tenantId: t,
+    host,
+    port,
+    secure: security === "tls",
+    starttls: security === "starttls",
+    username,
+    password,
+    from: fromRaw,
+    enabled,
+    updatedBy: actor(req)
+  });
+  audit(t, actor(req), enabled ? "Set the workspace email server" : "Disabled the workspace email server", `${host}:${port}`);
+
+  if (String(req.body.action || "") !== "test") {
+    return back(res, "/app/settings", {
+      notice: enabled ? `Email server saved — sending through ${host}:${port}.` : "Email server saved, but switched off."
+    });
+  }
+
+  if (!enabled) return back(res, "/app/settings", { error: "Switch the server on before sending a test." });
+  try {
+    const row = await sendMail({
+      tenantId: t,
+      userId: req.user.id,
+      to: req.user.email,
+      subject: `${req.tenant.brand_name} test message`,
+      kind: "test",
+      text: [
+        `This is a test from ${req.tenant.brand_name}.`,
+        `If you are reading it, the workspace email server (${host}:${port}) accepted the message and delivered it.`,
+        `Sent to ${req.user.email} from ${from || "the default From address"}.`
+      ].join("\n\n")
+    });
+    if (row.status === "sent") {
+      return back(res, "/app/settings", { notice: `Test message accepted by ${host}:${port} — check ${req.user.email}.` });
+    }
+    return back(res, "/app/settings", {
+      error: `The server rejected the test: ${row.error || "no response from the server"}`
+    });
+  } catch (err) {
+    return back(res, "/app/settings", { error: `The test message could not be sent: ${err.message}` });
+  }
+});
+
+router.post("/settings/mail/remove", (req, res) => {
+  const t = tenantId(req);
+  if (req.user.role !== "owner") return fail(res, 403, "Owner only", "Only an agency owner can change the email server.");
+  clearMailSettings(t);
+  audit(t, actor(req), "Removed the workspace email server", "settings");
+  back(res, "/app/settings", { notice: "Workspace email server removed. Delivery falls back to the deployment configuration." });
 });
 
 router.post("/settings/team/:id/reset", async (req, res) => {

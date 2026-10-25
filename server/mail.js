@@ -1,16 +1,20 @@
 import nodemailer from "nodemailer";
 import { db } from "./db.js";
+import { openSecret, sealSecret } from "./secrets.js";
 
 /**
  * Outbound mail.
  *
  * Every message is written to the `emails` outbox first, then handed to the
- * configured transport. With no provider configured the message stays in the
- * outbox with status `queued`, so the product still works end to end in a
- * demo or air-gapped install and an operator can inspect exactly what would
- * have been sent. Supported transports:
+ * transport that applies to that workspace. A workspace can configure its own
+ * SMTP submission server from Settings → Email server; until it does, the
+ * deployment's environment configuration is used. With neither, the message
+ * stays in the outbox with status `queued`, so the product still works end to
+ * end in a demo or air-gapped install and an operator can inspect exactly what
+ * would have been sent. Supported transports:
  *
- *   smtp      SMTP_HOST (Stalwart, Postfix, any submission server)
+ *   smtp      SMTP_HOST (Stalwart, Postfix, any submission server) or the
+ *             workspace's own row in tenant_mail
  *   resend    RESEND_API_KEY
  *   postmark  POSTMARK_TOKEN
  *   sendgrid  SENDGRID_API_KEY
@@ -28,14 +32,14 @@ const truthy = (value) => /^(1|true|yes|on)$/i.test(String(value || ""));
 const falsy = (value) => /^(0|false|no|off)$/i.test(String(value || ""));
 
 /**
- * SMTP submission settings. Stalwart's defaults are mirrored here: implicit
- * TLS on 465 (`SMTP_SECURE=1`) or STARTTLS on 587 (the default). `SMTP_STARTTLS=0`
- * exists for a trusted local relay only — it lets the password cross the wire
- * in the clear.
+ * Deployment-level settings. Stalwart's defaults are mirrored here: implicit
+ * TLS on 465 (`SMTP_SECURE=1`) or STARTTLS on 587 (the default).
+ * `SMTP_STARTTLS=0` exists for a trusted local relay only — it lets the
+ * password cross the wire in the clear.
  */
-const SMTP = (() => {
+const ENV_CONFIG = (() => {
   const secure = truthy(process.env.SMTP_SECURE);
-  return {
+  const smtp = {
     host: String(process.env.SMTP_HOST || "").trim(),
     port: Number(process.env.SMTP_PORT || 0) || (secure ? 465 : 587),
     secure,
@@ -43,55 +47,169 @@ const SMTP = (() => {
     user: String(process.env.SMTP_USER || "").trim(),
     pass: String(process.env.SMTP_PASS || "")
   };
-})();
-
-const smtpConfigured = Boolean(SMTP.host);
-
-export const transport = (() => {
+  const smtpConfigured = Boolean(smtp.host);
   const forced = String(process.env.MAIL_TRANSPORT || "").toLowerCase();
-  if (forced === "outbox" || forced === "none") return "outbox";
-  if ((forced === "smtp" || forced === "stalwart") && smtpConfigured) return "smtp";
-  if (forced === "resend" && process.env.RESEND_API_KEY) return "resend";
-  if (forced === "postmark" && process.env.POSTMARK_TOKEN) return "postmark";
-  if (forced === "sendgrid" && process.env.SENDGRID_API_KEY) return "sendgrid";
-  if (smtpConfigured) return "smtp";
-  if (process.env.RESEND_API_KEY) return "resend";
-  if (process.env.POSTMARK_TOKEN) return "postmark";
-  if (process.env.SENDGRID_API_KEY) return "sendgrid";
-  return "outbox";
+  let transport = "outbox";
+  if (forced === "outbox" || forced === "none") transport = "outbox";
+  else if ((forced === "smtp" || forced === "stalwart") && smtpConfigured) transport = "smtp";
+  else if (forced === "resend" && process.env.RESEND_API_KEY) transport = "resend";
+  else if (forced === "postmark" && process.env.POSTMARK_TOKEN) transport = "postmark";
+  else if (forced === "sendgrid" && process.env.SENDGRID_API_KEY) transport = "sendgrid";
+  else if (smtpConfigured) transport = "smtp";
+  else if (process.env.RESEND_API_KEY) transport = "resend";
+  else if (process.env.POSTMARK_TOKEN) transport = "postmark";
+  else if (process.env.SENDGRID_API_KEY) transport = "sendgrid";
+  return { transport, source: "environment", smtp, from: FROM };
 })();
 
+/** Kept for boot logging and callers that only look at the deployment. */
+export const transport = ENV_CONFIG.transport;
 export const mailConfigured = transport !== "outbox";
 
-export function mailStatus() {
+/** The workspace's saved row, whether or not it is switched on. */
+export function tenantMailRow(tenantId) {
+  if (!tenantId) return null;
+  return db.prepare("SELECT * FROM tenant_mail WHERE tenant_id = ?").get(Number(tenantId)) || null;
+}
+
+function workspaceConfig(row) {
+  if (!row || !row.enabled) return null;
   return {
-    transport,
-    from: FROM,
-    configured: mailConfigured,
-    server: transport === "smtp" ? `${SMTP.host}:${SMTP.port}` : "",
-    security:
-      transport === "smtp" ? (SMTP.secure ? "implicit TLS" : SMTP.starttls ? "STARTTLS" : "no TLS") : "",
-    auth: transport === "smtp" ? (SMTP.user ? `SMTP AUTH as ${SMTP.user}` : "no SMTP AUTH") : ""
+    transport: "smtp",
+    source: "workspace",
+    smtp: {
+      host: String(row.host || "").trim(),
+      port: Number(row.port) || 587,
+      secure: Boolean(row.secure),
+      starttls: Boolean(row.starttls),
+      user: String(row.username || "").trim(),
+      pass: openSecret(row.password_sealed)
+    },
+    from: String(row.from_address || "").trim() || FROM
   };
 }
 
-let smtpClient = null;
+const configCache = new Map();
 
-function smtpTransporter() {
-  if (!smtpClient) {
-    smtpClient = nodemailer.createTransport({
-      host: SMTP.host,
-      port: SMTP.port,
-      secure: SMTP.secure,
-      ...(SMTP.secure ? {} : SMTP.starttls ? { requireTLS: true } : { ignoreTLS: true }),
-      ...(SMTP.user ? { auth: { user: SMTP.user, pass: SMTP.pass } } : {}),
+/** Resolve the transport for one workspace, falling back to the deployment. */
+export function mailConfigFor(tenantId) {
+  if (!tenantId) return ENV_CONFIG;
+  const row = tenantMailRow(tenantId);
+  if (!row) return ENV_CONFIG;
+  const stamp = [
+    row.updated_at, row.enabled, row.host, row.port, row.secure, row.starttls,
+    row.username, row.password_sealed, row.from_address
+  ].join("|");
+  const key = Number(tenantId);
+  const hit = configCache.get(key);
+  if (hit && hit.stamp === stamp) return hit.config;
+  const config = workspaceConfig(row) || ENV_CONFIG;
+  configCache.set(key, { stamp, config });
+  return config;
+}
+
+export function mailConfiguredFor(tenantId) {
+  return mailConfigFor(tenantId).transport !== "outbox";
+}
+
+export function mailStatus(tenantId = null) {
+  const config = mailConfigFor(tenantId);
+  const smtp = config.smtp || {};
+  const row = tenantMailRow(tenantId);
+  return {
+    transport: config.transport,
+    from: config.from,
+    configured: config.transport !== "outbox",
+    source: config.source,
+    server: config.transport === "smtp" ? `${smtp.host}:${smtp.port}` : "",
+    security:
+      config.transport === "smtp" ? (smtp.secure ? "implicit TLS" : smtp.starttls ? "STARTTLS" : "no TLS") : "",
+    auth: config.transport === "smtp" ? (smtp.user ? `SMTP AUTH as ${smtp.user}` : "no SMTP AUTH") : "",
+    workspace: row
+      ? {
+          host: row.host,
+          port: row.port,
+          secure: Boolean(row.secure),
+          starttls: Boolean(row.starttls),
+          username: row.username || "",
+          from: row.from_address || "",
+          enabled: Boolean(row.enabled),
+          hasPassword: Boolean(row.password_sealed),
+          updated_at: row.updated_at,
+          updated_by: row.updated_by || ""
+        }
+      : null
+  };
+}
+
+/**
+ * Save the workspace's SMTP server. A blank password keeps the one already on
+ * file, so the form never has to round-trip a secret through the browser.
+ */
+export function saveMailSettings({
+  tenantId,
+  host,
+  port,
+  secure = false,
+  starttls = true,
+  username = "",
+  password = "",
+  from = "",
+  enabled = true,
+  updatedBy = "agency owner"
+}) {
+  const existing = tenantMailRow(tenantId);
+  const sealed = password ? sealSecret(password) : existing?.password_sealed || "";
+  db.prepare(
+    `INSERT INTO tenant_mail
+       (tenant_id, host, port, secure, starttls, username, password_sealed, from_address, enabled, updated_at, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(tenant_id) DO UPDATE SET
+       host = excluded.host, port = excluded.port, secure = excluded.secure,
+       starttls = excluded.starttls, username = excluded.username,
+       password_sealed = excluded.password_sealed, from_address = excluded.from_address,
+       enabled = excluded.enabled, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+  ).run(
+    Number(tenantId),
+    String(host).trim().slice(0, 160),
+    Number(port),
+    secure ? 1 : 0,
+    starttls ? 1 : 0,
+    String(username || "").trim().slice(0, 160),
+    sealed,
+    String(from || "").trim().slice(0, 180),
+    enabled ? 1 : 0,
+    new Date().toISOString(),
+    String(updatedBy || "").slice(0, 80)
+  );
+  configCache.delete(Number(tenantId));
+}
+
+export function clearMailSettings(tenantId) {
+  db.prepare("DELETE FROM tenant_mail WHERE tenant_id = ?").run(Number(tenantId));
+  configCache.delete(Number(tenantId));
+}
+
+const smtpClients = new Map();
+
+function smtpTransporter(smtp) {
+  const key = [smtp.host, smtp.port, smtp.secure, smtp.starttls, smtp.user, smtp.pass].join("|");
+  let client = smtpClients.get(key);
+  if (!client) {
+    client = nodemailer.createTransport({
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      ...(smtp.secure ? {} : smtp.starttls ? { requireTLS: true } : { ignoreTLS: true }),
+      ...(smtp.user ? { auth: { user: smtp.user, pass: smtp.pass } } : {}),
       tls: { minVersion: "TLSv1.2" },
       connectionTimeout: TIMEOUT_MS,
       greetingTimeout: TIMEOUT_MS,
       socketTimeout: TIMEOUT_MS
     });
+    smtpClients.set(key, client);
   }
-  return smtpClient;
+  return client;
 }
 
 function htmlEscape(value) {
@@ -130,10 +248,10 @@ async function postJson(url, headers, payload) {
   return response;
 }
 
-async function deliverWithProvider({ to, subject, text, html }) {
-  if (transport === "smtp") {
-    await smtpTransporter().sendMail({
-      from: FROM,
+async function deliverWithProvider(config, { to, subject, text, html }) {
+  if (config.transport === "smtp") {
+    await smtpTransporter(config.smtp).sendMail({
+      from: config.from,
       to,
       subject,
       text,
@@ -142,20 +260,20 @@ async function deliverWithProvider({ to, subject, text, html }) {
     });
     return "smtp";
   }
-  if (transport === "resend") {
+  if (config.transport === "resend") {
     await postJson(
       "https://api.resend.com/emails",
       { authorization: `Bearer ${process.env.RESEND_API_KEY}` },
-      { from: FROM, to: [to], subject, text, html, ...(REPLY_TO ? { reply_to: REPLY_TO } : {}) }
+      { from: config.from, to: [to], subject, text, html, ...(REPLY_TO ? { reply_to: REPLY_TO } : {}) }
     );
     return "resend";
   }
-  if (transport === "postmark") {
+  if (config.transport === "postmark") {
     await postJson(
       "https://api.postmarkapp.com/email",
       { "x-postmark-server-token": process.env.POSTMARK_TOKEN },
       {
-        From: FROM,
+        From: config.from,
         To: to,
         Subject: subject,
         TextBody: text,
@@ -166,13 +284,16 @@ async function deliverWithProvider({ to, subject, text, html }) {
     );
     return "postmark";
   }
-  if (transport === "sendgrid") {
+  if (config.transport === "sendgrid") {
     await postJson(
       "https://api.sendgrid.com/v3/mail/send",
       { authorization: `Bearer ${process.env.SENDGRID_API_KEY}` },
       {
         personalizations: [{ to: [{ email: to }] }],
-        from: { email: (FROM.match(/<([^>]+)>/)?.[1] || FROM).trim(), name: FROM.replace(/<[^>]+>/, "").trim() || "Clearpath" },
+        from: {
+          email: (config.from.match(/<([^>]+)>/)?.[1] || config.from).trim(),
+          name: config.from.replace(/<[^>]+>/, "").trim() || "Clearpath"
+        },
         ...(REPLY_TO ? { reply_to: { email: REPLY_TO } } : {}),
         subject,
         content: [
@@ -190,17 +311,18 @@ async function deliverWithProvider({ to, subject, text, html }) {
 export async function deliver(id) {
   const row = db.prepare("SELECT * FROM emails WHERE id = ?").get(Number(id));
   if (!row || row.status === "sent") return row;
+  const config = mailConfigFor(row.tenant_id);
   const attempts = row.attempts + 1;
   const stamp = new Date().toISOString();
 
-  if (!mailConfigured) {
+  if (config.transport === "outbox") {
     // No transport: keep it queued and countable, but do not burn retries.
     db.prepare("UPDATE emails SET status = 'queued', provider = NULL, error = NULL WHERE id = ?").run(row.id);
     return db.prepare("SELECT * FROM emails WHERE id = ?").get(row.id);
   }
 
   try {
-    const provider = await deliverWithProvider({
+    const provider = await deliverWithProvider(config, {
       to: row.to_email,
       subject: row.subject,
       text: row.body_text,
@@ -212,7 +334,7 @@ export async function deliver(id) {
   } catch (err) {
     db.prepare(
       "UPDATE emails SET status = 'failed', provider = ?, error = ?, attempts = ?, last_attempt_at = ? WHERE id = ?"
-    ).run(transport, String(err?.message || err).slice(0, 400), attempts, stamp, row.id);
+    ).run(config.transport, String(err?.message || err).slice(0, 400), attempts, stamp, row.id);
     console.error(`Clearpath mail: ${row.to_email} failed — ${err?.message || err}`);
   }
   return db.prepare("SELECT * FROM emails WHERE id = ?").get(row.id);
@@ -239,7 +361,7 @@ export async function sendMail({ tenantId = null, userId = null, to, subject, ki
 
   const id = Number(info.lastInsertRowid);
   const row = await deliver(id);
-  if (!mailConfigured) {
+  if (!mailConfiguredFor(tenantId)) {
     console.log(`Clearpath mail queued (no transport configured): ${cleanTo} · ${kind}${link ? ` · ${link}` : ""}`);
   }
   return row;
@@ -247,7 +369,6 @@ export async function sendMail({ tenantId = null, userId = null, to, subject, ki
 
 /** Retry failures with a simple linear backoff. Called on boot and on an interval. */
 export async function retryPending(limit = 25) {
-  if (!mailConfigured) return 0;
   const rows = db
     .prepare(
       `SELECT * FROM emails

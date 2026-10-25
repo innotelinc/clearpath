@@ -32,7 +32,7 @@ import {
   stripeWebhookSecret
 } from "../billing.js";
 import { createAccount, emailDeliveryNote, sendCredentials } from "../accounts.js";
-import { mailConfigured } from "../mail.js";
+import { mailConfiguredFor } from "../mail.js";
 import { throttle } from "../auth.js";
 import { verifyPassword } from "../security.js";
 import {
@@ -243,7 +243,7 @@ router.post("/tenants", async (req, res) => {
     invite: {
       name: form.owner_name,
       email: form.owner_email,
-      password: mailConfigured ? null : password,
+      password: mailConfiguredFor(tenantId) ? null : password,
       delivery: emailDeliveryNote(row)
     }
   });
@@ -413,7 +413,7 @@ router.post("/tenants/:id/owner", async (req, res) => {
     footprint: tenantFootprint(tenant.id),
     team: tenantTeam(tenant.id),
     clients: tenantClients(tenant.id),
-    invite: { name, email, password: mailConfigured ? null : password, delivery: emailDeliveryNote(row) }
+    invite: { name, email, password: mailConfiguredFor(tenant.id) ? null : password, delivery: emailDeliveryNote(row) }
   });
 });
 

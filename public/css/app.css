@@ -268,6 +268,26 @@ strong { font-weight: 620; }
 .card-head h2, .card-head h3 { font-size: 15px; letter-spacing: -0.01em; }
 .card-head p { font-size: 12.5px; color: var(--ink-3); margin-top: 3px; }
 .card-body { padding: 20px; }
+/* Label over value, as in a mailed package or a dispute: without this the
+   labels and their values run together on one line. */
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px 20px;
+}
+.kv > div { display: grid; gap: 3px; min-width: 0; }
+.kv .k {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.kv .v {
+  font-size: 14px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
 .card-foot {
   padding: 14px 20px;
   border-top: 1px solid var(--line);

@@ -1,0 +1,81 @@
+<%# `client` is reserved as an EJS compiler option, so the record arrives as clientRecord %>
+<% const client = clientRecord; %>
+<%- include("../partials/portal-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1>Mailings</h1>
+    <p>Every certified package we have posted for you, with the exact letters that went inside.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/portal">Back to your file</a>
+  </div>
+</div>
+
+<div class="notice notice-info">
+  <svg><use href="#i-mail"/></svg>
+  <div>
+    These are the letters as they were sealed, not as the file reads today. A dispute keeps moving
+    after it is mailed; this copy does not.
+  </div>
+</div>
+
+<% if (!packages.length) { %>
+  <section class="card">
+    <div class="empty">
+      <h3>Nothing mailed yet</h3>
+      <p>When your specialist posts a dispute package, it appears here with its letters and tracking number.</p>
+    </div>
+  </section>
+<% } else { %>
+  <% packages.forEach((p) => { %>
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <h2><%= p.ref %></h2>
+          <p>
+            <%= bureau[p.bureau] ? bureau[p.bureau].name : p.bureau %> ·
+            <span class="badge <%= statusClass(p.status) %>"><%= p.status %></span>
+          </p>
+        </div>
+        <div class="page-actions">
+          <% if (p.tracking) { %>
+            <a class="btn btn-sm" href="<%= trackingUrl(p.tracking) %>" target="_blank" rel="noopener">
+              Track <%= p.tracking %>
+            </a>
+          <% } %>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <div class="kv">
+          <div><span class="k">Posted</span><span class="v"><%= p.sent_at ? fmtDate(p.sent_at) : "Not posted yet" %></span></div>
+          <div><span class="k">Method</span><span class="v"><%= p.method %></span></div>
+          <div><span class="k">Letters</span><span class="v"><%= p.letters %></span></div>
+          <div><span class="k">Expected</span><span class="v"><%= p.eta || "—" %></span></div>
+        </div>
+      </div>
+
+      <% if (p.letterRows.length) { %>
+        <div class="list-rows">
+          <% p.letterRows.forEach((letter) => { %>
+            <details class="list-row" style="display:block">
+              <summary style="cursor:pointer">
+                <strong><%= letter.account %></strong>
+                <span class="meta"><%= letter.ref %> · <%= bureau[letter.bureau] ? bureau[letter.bureau].name : letter.bureau %></span>
+              </summary>
+              <pre style="white-space:pre-wrap;font-family:var(--mono,ui-monospace,monospace);font-size:12.5px;line-height:1.55;margin:12px 0 4px;color:var(--ink,#e7f0fb)"><%= letter.body %></pre>
+              <p class="tiny muted">Captured <%= fmtDateTime(letter.captured_at) %></p>
+            </details>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <div class="empty">
+          <p>This package is being prepared. Its letters appear here once it is posted.</p>
+        </div>
+      <% } %>
+    </section>
+  <% }) %>
+<% } %>
+
+<%- include("../partials/portal-foot") %>

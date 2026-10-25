@@ -52,6 +52,37 @@ export const clientTradelines = (tenantId, clientId) =>
 export const clientPackages = (tenantId, clientId) =>
   db.prepare("SELECT * FROM packages WHERE tenant_id = ? AND client_id = ? ORDER BY id DESC").all(tenantId, clientId);
 
+/**
+ * Exactly what went into each envelope, frozen at mailing time. The portal
+ * shows these rather than the live dispute text, because a dispute keeps moving
+ * after it is posted and the client is entitled to see what was actually sent.
+ */
+export const clientPackageLetters = (tenantId, clientId) =>
+  db
+    .prepare(
+      `SELECT l.* FROM package_letters l
+       JOIN packages p ON p.id = l.package_id
+       WHERE l.tenant_id = ? AND p.client_id = ?
+       ORDER BY l.package_id DESC, l.id`
+    )
+    .all(tenantId, clientId);
+
+/**
+ * The mailed snapshot for one dispute, with the envelope it travelled in, so
+ * the portal can point the client at the tracking number for that letter.
+ */
+export const clientSentLetter = (tenantId, clientId, disputeId) =>
+  db
+    .prepare(
+      `SELECT l.*, p.ref AS package_ref, p.tracking AS package_tracking,
+              p.status AS package_status, p.method AS package_method, p.sent_at AS package_sent_at
+       FROM package_letters l
+       JOIN packages p ON p.id = l.package_id
+       WHERE l.tenant_id = ? AND p.client_id = ? AND l.dispute_id = ?
+       ORDER BY l.id DESC LIMIT 1`
+    )
+    .get(tenantId, clientId, Number(disputeId));
+
 export const listDisputes = (tenantId, { status = "", q = "" } = {}) => {
   const params = [tenantId];
   let sql = `SELECT d.*, c.name AS client_name FROM disputes d JOIN clients c ON c.id = d.client_id WHERE d.tenant_id = ?`;

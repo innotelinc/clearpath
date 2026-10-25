@@ -262,6 +262,23 @@ CREATE TABLE IF NOT EXISTS platform_sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+/* A workspace's own SMTP submission server, set from Settings → Email server.
+   The password is sealed with server/secrets.js, never stored in the clear and
+   never sent back to the browser. */
+CREATE TABLE IF NOT EXISTS tenant_mail (
+  tenant_id INTEGER PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL DEFAULT 587,
+  secure INTEGER NOT NULL DEFAULT 0,
+  starttls INTEGER NOT NULL DEFAULT 1,
+  username TEXT,
+  password_sealed TEXT,
+  from_address TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by TEXT
+);
+
 /* Deployment-wide operator settings: the Stripe keys live here when they are
    set from the console instead of the environment. Values are secrets, so the
    UI only ever renders a mask. */

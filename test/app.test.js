@@ -2,6 +2,7 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import nodeHttp from "node:http";
+import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -642,4 +643,222 @@ test("changing a password keeps the current session and ends the others", async 
 
   const relogin = await signIn("marcus@denovocredit.com", "Specialist!2027");
   assert.equal(relogin.res.status, 303);
+});
+
+test("a client sees what went into a package and the letter on an open dispute", async () => {
+  // A client this file has not signed in yet: the login limiter is per account,
+  // and earlier cases already use up the budget on the Denovo demo client.
+  const session = await signIn("priya@example.com", "Client!2026", "client");
+  assert.equal(session.res.status, 303, "the demo client should be able to sign in");
+  const client = inspect.prepare(
+    "SELECT c.id, c.tenant_id FROM clients c JOIN users u ON u.client_id = c.id WHERE u.email = ?"
+  ).get("priya@example.com");
+  assert.ok(client, "the demo client should be seeded");
+
+  const dispute = inspect.prepare(
+    "SELECT id, tenant_id, bureau, account FROM disputes WHERE client_id = ? ORDER BY id LIMIT 1"
+  ).get(client.id);
+  assert.ok(dispute, "the demo client should have a dispute");
+
+  const letter = "Dear Experian, this is a formal dispute of the account listed below.";
+  inspect.prepare("UPDATE disputes SET letter_body = ? WHERE id = ?").run(letter, dispute.id);
+
+  const ref = `CP-TEST-${Date.now()}`;
+  const pkg = inspect.prepare(
+    "INSERT INTO packages (tenant_id, client_id, ref, bureau, letters, status, tracking) VALUES (?, ?, ?, ?, 1, 'mailed', ?)"
+  ).run(dispute.tenant_id, client.id, ref, dispute.bureau, "9400TESTTRACKING");
+  inspect.prepare(
+    "INSERT INTO package_letters (tenant_id, package_id, dispute_id, ref, account, bureau, body) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ).run(dispute.tenant_id, Number(pkg.lastInsertRowid), dispute.id, ref, dispute.account, dispute.bureau, letter);
+
+  const mailings = await http("/portal/packages", { jar: session.jar });
+  assert.equal(mailings.status, 200);
+  assert.match(mailings.body, new RegExp(ref), "the mailed package should be listed");
+  assert.match(mailings.body, /9400TESTTRACKING/);
+  assert.match(mailings.body, /formal dispute of the account/, "the letter inside the package should be visible");
+
+  // The dates and the method read as label/value pairs. They need the rule that
+  // puts each value under its label: without it every pair collapses into one
+  // run-together line ("PostedNot posted yetMethodCertified + return receipt").
+  assert.match(mailings.body, /<span class="k">Posted<\/span><span class="v">/);
+  const css = await http("/assets/css/app.css");
+  assert.equal(css.status, 200);
+  assert.match(css.body, /\.kv \.k \{/, "the stylesheet the portal links must style the pairs it renders");
+
+  const detail = await http(`/portal/disputes/${dispute.id}`, { jar: session.jar });
+  assert.equal(detail.status, 200);
+  assert.match(detail.body, /formal dispute of the account/);
+  assert.match(detail.body, /9400TESTTRACKING/, "the dispute should point at the package that carried it");
+
+  const other = inspect.prepare("SELECT id FROM disputes WHERE client_id <> ? LIMIT 1").get(client.id);
+  assert.equal((await http(`/portal/disputes/${other.id}`, { jar: session.jar })).status, 404);
+});
+
+test("a document is opened for review before it can be verified", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+
+  const pending = inspect
+    .prepare("SELECT * FROM documents WHERE status = 'Pending review' ORDER BY id LIMIT 1")
+    .get();
+  assert.ok(pending, "the demo seed should leave a document awaiting review");
+  assert.ok(pending.stored_name, "a seeded document should have a reviewable file");
+
+  const list = await http("/app/documents", { jar });
+  assert.equal(list.status, 200);
+  assert.match(list.body, /Review/, "the vault should offer a review, not a blind verify");
+
+  const review = await http(`/app/documents/${pending.id}`, { jar });
+  assert.equal(review.status, 200);
+  assert.match(review.body, /Verify document/);
+  assert.match(review.body, new RegExp(`/app/documents/${pending.id}/file`), "the file should be framed for reading");
+
+  const inline = await http(`/app/documents/${pending.id}/file`, { jar, binary: true });
+  assert.equal(inline.status, 200);
+  assert.equal(inline.type, "application/pdf");
+  assert.match(inline.body.subarray(0, 5).toString("latin1"), /^%PDF-/, "the preview should be the real PDF");
+
+  const download = await http(`/app/documents/${pending.id}/download`, { jar });
+  assert.equal(download.status, 200, "the vault download must not 404");
+
+  const verified = await http(`/app/documents/${pending.id}/verify`, {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf"), return: "review" }
+  });
+  assert.equal(verified.status, 303);
+  const after = inspect.prepare("SELECT status FROM documents WHERE id = ?").get(pending.id);
+  assert.equal(after.status, "Verified");
+});
+
+/** A tiny SMTP server: enough for nodemailer to authenticate and hand over a message. */
+function startSmtpStub() {
+  const messages = [];
+  const transcript = [];
+  const server = net.createServer((socket) => {
+    let buffer = "";
+    let inData = false;
+    let authStage = 0;
+    socket.write("220 stub ESMTP\r\n");
+
+    const pump = () => {
+      for (;;) {
+        if (inData) {
+          const end = buffer.indexOf("\r\n.\r\n");
+          if (end === -1) return;
+          messages.push(buffer.slice(0, end));
+          buffer = buffer.slice(end + 5);
+          inData = false;
+          socket.write("250 OK queued\r\n");
+          continue;
+        }
+        const at = buffer.indexOf("\r\n");
+        if (at === -1) return;
+        const line = buffer.slice(0, at);
+        buffer = buffer.slice(at + 2);
+        transcript.push(line);
+        const cmd = line.toUpperCase();
+        if (cmd.startsWith("EHLO")) socket.write("250-stub\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n");
+        else if (cmd.startsWith("HELO")) socket.write("250 stub\r\n");
+        else if (cmd.startsWith("AUTH LOGIN")) { authStage = 1; socket.write("334 VXNlcm5hbWU6\r\n"); }
+        else if (authStage === 1) { authStage = 2; socket.write("334 UGFzc3dvcmQ6\r\n"); }
+        else if (authStage === 2) { authStage = 0; socket.write("235 Authentication successful\r\n"); }
+        else if (cmd.startsWith("AUTH PLAIN")) socket.write("235 Authentication successful\r\n");
+        else if (cmd.startsWith("MAIL FROM")) socket.write("250 OK\r\n");
+        else if (cmd.startsWith("RCPT TO")) socket.write("250 OK\r\n");
+        else if (cmd === "DATA") { inData = true; socket.write("354 End data with <CR><LF>.<CR><LF>\r\n"); }
+        else if (cmd === "QUIT") { socket.write("221 Bye\r\n"); socket.end(); return; }
+        else socket.write("250 OK\r\n");
+      }
+    };
+
+    socket.on("data", (chunk) => { buffer += chunk.toString("utf8"); pump(); });
+    socket.on("error", () => {});
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () =>
+      resolve({
+        port: server.address().port,
+        messages,
+        transcript,
+        close: () => new Promise((done) => server.close(() => done()))
+      })
+    );
+  });
+}
+
+test("a workspace saves its own SMTP server and sends through it", async () => {
+  const stub = await startSmtpStub();
+  try {
+    const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+    const owner = inspect.prepare("SELECT id, tenant_id FROM users WHERE email = ?").get("dana@denovocredit.com");
+
+    const save = await http("/app/settings/mail", {
+      method: "POST",
+      jar,
+      form: {
+        _csrf: jar.get("cp_csrf"),
+        host: "127.0.0.1",
+        port: String(stub.port),
+        security: "none",
+        username: "clearpath@example.test",
+        password: "app-password",
+        from: "Denovo Credit <no-reply@denovocredit.com>",
+        enabled: "1",
+        action: "save"
+      }
+    });
+    assert.equal(save.status, 303);
+
+    const saved = inspect.prepare("SELECT * FROM tenant_mail WHERE tenant_id = ?").get(owner.tenant_id);
+    assert.ok(saved, "the workspace server should be stored");
+    assert.equal(saved.host, "127.0.0.1");
+    assert.match(saved.password_sealed, /^v1:/, "the SMTP password should be sealed");
+    assert.ok(!saved.password_sealed.includes("app-password"), "the password must not be stored in the clear");
+
+    const settings = await http("/app/settings", { jar });
+    assert.equal(settings.status, 200);
+    assert.match(settings.body, /Workspace server/);
+    assert.match(settings.body, /Saved \(encrypted\)/);
+
+    const test = await http("/app/settings/mail", {
+      method: "POST",
+      jar,
+      form: {
+        _csrf: jar.get("cp_csrf"),
+        host: "127.0.0.1",
+        port: String(stub.port),
+        security: "none",
+        username: "clearpath@example.test",
+        password: "",
+        from: "Denovo Credit <no-reply@denovocredit.com>",
+        enabled: "1",
+        action: "test"
+      }
+    });
+    assert.equal(test.status, 303);
+    assert.equal(stub.messages.length, 1, "the test message should reach the workspace server");
+    assert.match(stub.messages[0], /Subject: Denovo Credit test message/);
+
+    // The saved password, decrypted from the database, is what authenticated.
+    const plainAt = stub.transcript.findIndex((line) => /^AUTH PLAIN /i.test(line));
+    assert.ok(plainAt >= 0, "the transport should authenticate with the saved credentials");
+    const plain = Buffer.from(stub.transcript[plainAt].split(" ")[2], "base64").toString("utf8");
+    assert.equal(plain.split("\0").pop(), "app-password");
+
+    const row = inspect
+      .prepare("SELECT * FROM emails WHERE tenant_id = ? AND kind = 'test' ORDER BY id DESC LIMIT 1")
+      .get(owner.tenant_id);
+    assert.equal(row.status, "sent");
+    assert.equal(row.provider, "smtp");
+
+    const removed = await http("/app/settings/mail/remove", {
+      method: "POST",
+      jar,
+      form: { _csrf: jar.get("cp_csrf") }
+    });
+    assert.equal(removed.status, 303);
+    assert.equal(inspect.prepare("SELECT COUNT(*) AS n FROM tenant_mail WHERE tenant_id = ?").get(owner.tenant_id).n, 0);
+  } finally {
+    await stub.close();
+  }
 });

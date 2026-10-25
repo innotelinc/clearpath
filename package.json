@@ -13,7 +13,7 @@
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed.js",
     "reset": "node --disable-warning=ExperimentalWarning scripts/reset.js",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js",
-    "check": "node --check server/index.js && node --check server/db.js && node --check server/auth.js && node --check server/pdf.js && node --check server/env.js && node --check server/mail.js && node --check server/accounts.js && node --check server/studio.js && node --check server/billing.js && node --check server/lob.js"
+    "check": "node --check server/index.js && node --check server/db.js && node --check server/auth.js && node --check server/pdf.js && node --check server/env.js && node --check server/mail.js && node --check server/secrets.js && node --check server/demo-files.js && node --check server/data.js && node --check server/accounts.js && node --check server/studio.js && node --check server/billing.js && node --check server/lob.js && node --check server/oidc.js && node --check server/routes/admin.js && node --check server/routes/portal.js && node --check server/routes/platform.js"
   },
   "dependencies": {
     "ejs": "^3.1.10",

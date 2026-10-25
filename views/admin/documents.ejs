@@ -49,7 +49,7 @@
                   <div class="row" style="gap:9px">
                     <svg style="width:16px;height:16px;color:var(--ink-3)"><use href="#i-file"/></svg>
                     <div>
-                      <div class="small" style="font-weight:570"><%= doc.name %></div>
+                      <a class="small" style="font-weight:570" href="/app/documents/<%= doc.id %>"><%= doc.name %></a>
                       <div class="tiny muted"><%= doc.ref %> · <%= doc.size || "—" %></div>
                     </div>
                   </div>
@@ -60,13 +60,12 @@
                 <td class="mono muted"><%= String(doc.sha256).slice(0, 10) %>…</td>
                 <td class="nowrap small muted"><%= fmtDate(doc.uploaded_at) %><div class="tiny"><%= doc.uploaded_by %></div></td>
                 <td class="actions">
-                  <% if (doc.status !== "Verified") { %>
-                    <form method="post" action="/app/documents/<%= doc.id %>/verify" style="display:inline">
-                      <input type="hidden" name="_csrf" value="<%= csrf %>">
-                      <button class="btn btn-sm" type="submit">Verify</button>
-                    </form>
+                  <a class="btn btn-sm<%= doc.status === "Verified" ? " btn-ghost" : "" %>" href="/app/documents/<%= doc.id %>">
+                    <%= doc.status === "Verified" ? "Open" : "Review" %>
+                  </a>
+                  <% if (doc.stored_name) { %>
+                    <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
                   <% } %>
-                  <a class="btn btn-sm btn-ghost" href="/app/documents/<%= doc.id %>/download">Download</a>
                 </td>
               </tr>
             <% }) %>

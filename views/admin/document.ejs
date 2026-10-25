@@ -1,0 +1,97 @@
+<%- include("../partials/app-head", { title }) %>
+
+<div class="page-head">
+  <div>
+    <h1><%= doc.name %></h1>
+    <p>
+      <%= doc.ref %> · <%= doc.type %> ·
+      <span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span>
+    </p>
+  </div>
+  <div class="page-actions">
+    <a class="btn btn-ghost" href="<%= backTo %>">Back to documents</a>
+    <% if (hasFile) { %>
+      <a class="btn" href="/app/documents/<%= doc.id %>/download"><svg><use href="#i-download"/></svg> Download</a>
+    <% } %>
+    <% if (doc.status !== "Verified") { %>
+      <form method="post" action="/app/documents/<%= doc.id %>/verify" style="display:inline">
+        <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <input type="hidden" name="return" value="review">
+        <button class="btn btn-primary" type="submit"><svg><use href="#i-check"/></svg> Verify document</button>
+      </form>
+    <% } %>
+  </div>
+</div>
+
+<div class="grid-portal">
+  <div class="stack">
+    <section class="card">
+      <div class="card-head">
+        <div><h2>The file</h2><p>Read it before you verify it — nothing is accepted unseen</p></div>
+        <% if (!hasFile) { %><span class="badge amber">No file attached</span><% } %>
+      </div>
+
+      <% if (!hasFile) { %>
+        <div class="empty">
+          <h3>No original on this record</h3>
+          <p>This row has metadata only, so there is nothing to open. Ask the client to upload it again,
+             or use Upload on the Documents page to attach the file.</p>
+        </div>
+      <% } else if (previewKind === "pdf") { %>
+        <iframe
+          src="/app/documents/<%= doc.id %>/file"
+          title="<%= doc.name %>"
+          style="display:block;width:100%;height:72vh;border:0;border-bottom:1px solid var(--line);background:#fff"></iframe>
+        <p class="tiny muted" style="padding:10px 16px">
+          If the preview does not render, <a href="/app/documents/<%= doc.id %>/file" target="_blank" rel="noopener">open the PDF in a new tab</a>.
+        </p>
+      <% } else if (previewKind) { %>
+        <div style="padding:16px;background:var(--surface-2,#f8fafc);text-align:center">
+          <img src="/app/documents/<%= doc.id %>/file" alt="<%= doc.name %>"
+               style="max-width:100%;max-height:72vh;border-radius:8px;border:1px solid var(--line)">
+        </div>
+      <% } else { %>
+        <div class="empty">
+          <h3>Preview not supported</h3>
+          <p>This file type cannot be shown in the browser. Download it to review it, then verify.</p>
+        </div>
+      <% } %>
+    </section>
+  </div>
+
+  <div class="stack">
+    <section class="card">
+      <div class="card-head"><div><h2>Record</h2><p>What the vault holds</p></div></div>
+      <div class="card-body">
+        <dl class="def-list">
+          <div><dt>Client</dt><dd>
+            <% if (documentClient) { %>
+              <a class="link" href="/app/clients/<%= documentClient.id %>"><%= documentClient.name %></a>
+            <% } else { %>—<% } %>
+          </dd></div>
+          <div><dt>Reference</dt><dd class="mono"><%= doc.ref %></dd></div>
+          <div><dt>Type</dt><dd><%= doc.type %></dd></div>
+          <div><dt>Status</dt><dd><span class="badge <%= statusClass(doc.status) %>"><%= doc.status %></span></dd></div>
+          <div><dt>Size</dt><dd><%= doc.size || "—" %></dd></div>
+          <div><dt>Received</dt><dd><%= fmtDate(doc.uploaded_at) %> · <%= doc.uploaded_by === "client" ? "from the client" : "uploaded by the agency" %></dd></div>
+          <div><dt>SHA-256</dt><dd class="mono tiny" style="word-break:break-all"><%= doc.sha256 %></dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="card card-pad">
+      <h3 style="font-size:14px;margin-bottom:8px">Before you verify</h3>
+      <ul class="checklist" style="margin-top:10px;gap:10px">
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>It is the right document</strong>Name, address and account last four match the client file.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>Every page is readable</strong>Nothing is cropped, blurred or blacked out where the account number should be.</span></li>
+        <li><span class="tick"><svg><use href="#i-check"/></svg></span><span><strong>It supports the dispute</strong>The dates and balances line up with what we are challenging.</span></li>
+      </ul>
+      <p class="tiny muted" style="margin-top:12px">
+        Verifying marks the document accepted on the client's file and counts toward their verified total.
+        It cannot be undone from here.
+      </p>
+    </section>
+  </div>
+</div>
+
+<%- include("../partials/app-foot") %>

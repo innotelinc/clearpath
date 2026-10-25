@@ -54,6 +54,16 @@
           </div>
         <% } %>
 
+        <% if (ssoEnabled) { %>
+          <a class="btn btn-dark btn-block btn-lg" href="/auth/authentik" style="margin-top:20px;text-align:center">
+            Sign in with Authentik
+          </a>
+          <p class="tiny muted" style="margin-top:8px">
+            For members of the <code><%= ssoGroup %></code> group. The form below still works for local operator accounts.
+          </p>
+          <p class="tiny muted" style="margin:18px 0 6px;letter-spacing:.08em;text-transform:uppercase">or use a password</p>
+        <% } %>
+
         <form method="post" action="/platform/login" autocomplete="on">
           <input type="hidden" name="_csrf" value="<%= csrf %>">
           <input type="hidden" name="next" value="<%= next %>">
