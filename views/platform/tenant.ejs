@@ -216,6 +216,41 @@
         <button class="btn" type="submit" data-busy-label="Inviting…"><svg><use href="#i-plus"/></svg>Invite owner</button>
       </form>
     </section>
+
+    <%# Deleting a workspace is the only action on this page with no undo, so it is
+        set apart, it states the cost in numbers, and it asks for the slug. %>
+    <section class="card">
+      <div class="card-head">
+        <div><h2>Delete this workspace</h2><p>Removes the workspace and everything in it — this cannot be undone</p></div>
+        <span class="badge rose">Irreversible</span>
+      </div>
+      <div class="card-body stack">
+        <p class="tiny muted" style="margin:0">
+          <% if (typeof footprint !== "undefined" && footprint) { %>
+            Deleting <strong><%= tenant.name %></strong> removes
+            <strong><%= footprint.clients %></strong> client<%= footprint.clients === 1 ? "" : "s" %>,
+            <strong><%= footprint.seats %></strong> seat<%= footprint.seats === 1 ? "" : "s" %>,
+            <strong><%= footprint.disputes %></strong> dispute<%= footprint.disputes === 1 ? "" : "s" %> and
+            <strong><%= footprint.documents %></strong> document<%= footprint.documents === 1 ? "" : "s" %>,
+            including every uploaded file. Their sign-ins, letters and message history go with them.
+          <% } else { %>
+            Deleting <strong><%= tenant.name %></strong> removes every client, seat, dispute and document in it, including
+            uploaded files.
+          <% } %>
+          Your operator account and payment settings are not touched.
+        </p>
+        <form method="post" action="/platform/tenants/<%= tenant.id %>/delete" class="stack"
+              data-confirm="Delete <%= tenant.name %> and everything in it? This cannot be undone.">
+          <input type="hidden" name="_csrf" value="<%= csrf %>">
+          <div class="field">
+            <label for="delete-confirm">Type <span class="mono"><%= tenant.slug %></span> to confirm</label>
+            <input class="input" id="delete-confirm" name="confirm" required autocomplete="off" spellcheck="false"
+                   placeholder="<%= tenant.slug %>">
+          </div>
+          <button class="btn btn-danger" type="submit" data-busy-label="Deleting…">Delete workspace</button>
+        </form>
+      </div>
+    </section>
   </div>
 </div>
 

@@ -372,6 +372,69 @@ test("an operator can sign in while an agency session is open in the same browse
   assert.equal(workspace.status, 200);
 });
 
+test("deleting a workspace removes its clients, seats, documents and files", async () => {
+  const { jar } = await platformSignIn();
+  // The platform session's CSRF token is issued with the page, not with the cookie
+  // the sign-in sets — every POST in this file reads the console first for that reason.
+  await http("/platform/tenants/new", { jar });
+
+  // A workspace of its own, so nothing else in this file is deleted with it.
+  const created = await http("/platform/tenants", {
+    method: "POST",
+    jar,
+    form: {
+      _csrf: jar.get("cp_csrf"),
+      name: "Temp Credit Co",
+      slug: "temp-co",
+      domain: "temp.clearpath.test",
+      brand_name: "Temp Credit",
+      owner_name: "Sam Patel",
+      owner_email: "sam@temp.test"
+    }
+  });
+  assert.equal(created.status, 201);
+  const tenant = db.prepare("SELECT * FROM tenants WHERE slug = 'temp-co'").get();
+  assert.ok(tenant, "the workspace exists before the delete");
+
+  // Give it something to cascade to: a client, a document row and the file on disk.
+  const clientId = Number(
+    db
+      .prepare("INSERT INTO clients (tenant_id, ref, name, email, joined) VALUES (?, 'CL-2001', 'Ava Brooks', 'ava@temp.test', '2026-10-01')")
+      .run(tenant.id).lastInsertRowid
+  );
+  db.prepare(
+    `INSERT INTO documents (tenant_id, client_id, ref, name, type, sha256, stored_name, uploaded_at)
+     VALUES (?, ?, 'DOC-2001', 'id.pdf', 'Identity', 'abc', 'temp-id.pdf', '2026-10-01')`
+  ).run(tenant.id, clientId);
+  const uploaded = path.join(dataDir, "uploads", "temp-id.pdf");
+  fs.mkdirSync(path.dirname(uploaded), { recursive: true });
+  fs.writeFileSync(uploaded, "not really a pdf");
+
+  // A mis-click cannot delete: the confirmation is the slug, not a checkbox.
+  const refused = await http(`/platform/tenants/${tenant.id}/delete`, {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf"), confirm: "yes" }
+  });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body, /Nothing was deleted/);
+  assert.ok(db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenant.id), "the workspace survives a wrong confirmation");
+
+  const removed = await http(`/platform/tenants/${tenant.id}/delete`, {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf"), confirm: "temp-co" }
+  });
+  assert.equal(removed.status, 303);
+  assert.match(decodeURIComponent(removed.location), /Temp Credit Co deleted/);
+
+  assert.equal(db.prepare("SELECT id FROM tenants WHERE id = ?").get(tenant.id), undefined);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM clients WHERE tenant_id = ?").get(tenant.id).n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?").get(tenant.id).n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM documents WHERE tenant_id = ?").get(tenant.id).n, 0);
+  assert.equal(fs.existsSync(uploaded), false, "the uploaded file goes with the document row");
+});
+
 test("sending through Lob is refused with a clear message while it is disabled", async () => {
   const { jar } = await agencySignIn();
   const pkg = db.prepare("SELECT * FROM packages WHERE status = 'Ready' ORDER BY id LIMIT 1").get();
@@ -384,4 +447,69 @@ test("sending through Lob is refused with a clear message while it is disabled",
   });
   assert.equal(res.status, 303);
   assert.match(decodeURIComponent(res.location), /Lob is not enabled yet/);
+});
+
+test("resetting the system leaves a clean install with the operator and payment settings", async () => {
+  const { jar } = await platformSignIn();
+  await http("/platform", { jar });
+
+  // A payment setting set from the console: this is what a reset must not take.
+  db.prepare(
+    "INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES ('stripe_secret_key', 'sk_test_reset_marker', '2026-10-24', 'test')"
+    + " ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run();
+  const before = db.prepare("SELECT COUNT(*) AS n FROM tenants").get().n;
+  assert.ok(before > 0, "the seeded estate exists before the reset");
+
+  // The gate is the word, and it is the only thing between a click and the estate.
+  // Case is not the point (`reset` is accepted); a different word must do nothing.
+  const refused = await http("/platform/reset", {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf"), confirm: "yes" }
+  });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body, /Nothing was reset/);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM tenants").get().n, before, "a wrong confirmation resets nothing");
+
+  const reset = await http("/platform/reset", {
+    method: "POST",
+    jar,
+    form: { _csrf: jar.get("cp_csrf"), confirm: "RESET" }
+  });
+  assert.equal(reset.status, 303);
+  assert.match(decodeURIComponent(reset.location), /Reset complete/);
+
+  for (const table of ["tenants", "clients", "users", "disputes", "documents", "sessions", "leads", "emails", "audit_log"]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, `${table} should be empty after a reset`);
+  }
+  assert.ok(db.prepare("SELECT COUNT(*) AS n FROM platform_admins").get().n >= 1, "the operator account survives");
+  assert.equal(
+    db.prepare("SELECT value FROM platform_settings WHERE key = 'stripe_secret_key'").get().value,
+    "sk_test_reset_marker",
+    "payment settings survive"
+  );
+  const uploads = fs.readdirSync(path.join(dataDir, "uploads"));
+  assert.deepEqual(uploads, [], "uploaded files are swept with the reset");
+
+  // The operator is still signed in, and the console now reads as a clean install.
+  const after = await http("/platform", { jar });
+  assert.equal(after.status, 200);
+  assert.match(after.body, /No workspaces yet/);
+  assert.match(after.body, /Reset system/);
+
+  // Nobody from the old install can sign in any more, and the sign-in page says why
+  // instead of failing on a workspace that no longer exists.
+  const stranded = await agencySignIn();
+  assert.equal(stranded.res.status, 503);
+  assert.match(stranded.res.body, /no workspace yet/i);
+
+  const portalJar = new Map();
+  await http("/portal/login", { jar: portalJar });
+  const portal = await http("/portal/login", {
+    method: "POST",
+    jar: portalJar,
+    form: { _csrf: portalJar.get("cp_csrf"), email: "x@y.test", password: "nope" }
+  });
+  assert.equal(portal.status, 503, "the portal form answers the same way");
 });

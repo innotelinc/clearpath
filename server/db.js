@@ -496,6 +496,133 @@ export function tenantStats(tenantId) {
   };
 }
 
+/**
+ * What one workspace owns, counted before it is removed.
+ *
+ * A delete that only says "done" is not enough: removing a workspace takes its
+ * clients, their disputes, their letters and every seat with it, and the
+ * operator who pressed the button should be told the size of what went. This is
+ * the receipt, read before the rows are.
+ */
+export function tenantFootprint(tenantId) {
+  const one = (table) =>
+    db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE tenant_id = ?`).get(tenantId)?.n || 0;
+  return {
+    clients: one("clients"),
+    seats: one("users"),
+    disputes: one("disputes"),
+    packages: one("packages"),
+    documents: one("documents"),
+    messages: one("messages")
+  };
+}
+
+/**
+ * Remove one document's stored file from `DATA_DIR/uploads`.
+ *
+ * `stored_name` comes out of the database, so it is a filename and not a path —
+ * but it is still a value a row controls, and `path.basename` is what stops a
+ * row from naming a file outside the uploads directory. Best effort: a missing
+ * file is not a failed delete.
+ */
+function removeUpload(storedName) {
+  if (!storedName) return false;
+  try {
+    fs.unlinkSync(path.join(DATA_DIR, "uploads", path.basename(String(storedName))));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Delete a workspace and everything hanging off it.
+ *
+ * The schema carries `ON DELETE CASCADE` from `tenants` to clients, users,
+ * sessions, tradelines, disputes, packages, documents, messages, drafts and the
+ * rest, with `PRAGMA foreign_keys = ON` set at connect time — so this is one
+ * row, and SQLite takes the workspace with it. `leads` is deliberately not
+ * cascaded (`ON DELETE SET NULL`): a prospect who filled the marketing form is
+ * not the workspace's to delete.
+ *
+ * Files are removed only after the commit succeeds: a delete that rolls back
+ * must not have taken the documents with it. Returns the receipt, or null when
+ * the workspace was already gone.
+ */
+export function deleteTenant(tenantId) {
+  const tenant = getTenantById(tenantId);
+  if (!tenant) return null;
+  const footprint = tenantFootprint(tenant.id);
+  const files = db
+    .prepare("SELECT stored_name FROM documents WHERE tenant_id = ? AND stored_name IS NOT NULL")
+    .all(tenant.id)
+    .map((row) => row.stored_name);
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM tenants WHERE id = ?").run(tenant.id);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  const removedFiles = files.filter(removeUpload).length;
+  return { tenant, footprint, files: removedFiles };
+}
+
+/**
+ * Return the deployment to a fresh install: every workspace, client and their
+ * records gone, this deployment's own identity left intact.
+ *
+ * What survives is deliberate. `platform_admins` and `platform_sessions` stay,
+ * because a reset that signs the operator out of the console they just used is
+ * a lockout with extra steps. `platform_settings` stays, because it holds the
+ * Stripe keys and losing them silently turns billing off — the reset is about
+ * the customers, not the operator's configuration.
+ *
+ * Everything else goes, including the rows that have no tenant to cascade from:
+ * `leads` (a prospect list is not an install), `emails` and `package_events`
+ * and `billing_events` carry tenant-less rows of their own, and the `sqlite_sequence`
+ * counters are cleared so the first workspace of the new install is id 1.
+ */
+export function resetInstall() {
+  const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n || 0;
+  const before = { tenants: count("tenants"), clients: count("clients"), files: 0 };
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec("DELETE FROM tenants");
+    db.exec("DELETE FROM leads");
+    db.exec("DELETE FROM emails");
+    db.exec("DELETE FROM billing_events");
+    db.exec("DELETE FROM package_events");
+    // A `sqlite_sequence` table only exists once an AUTOINCREMENT table has held
+    // a row, so on a never-used install this is legitimately absent.
+    try {
+      db.exec("DELETE FROM sqlite_sequence");
+    } catch {
+      /* no AUTOINCREMENT rows yet */
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  // The directory is swept rather than the document rows walked: a file whose
+  // row was already gone would otherwise stay on disk through every reset, and
+  // "clean install" has to mean the disk too.
+  try {
+    for (const entry of fs.readdirSync(path.join(DATA_DIR, "uploads"), { withFileTypes: true })) {
+      if (entry.isFile() && removeUpload(entry.name)) before.files += 1;
+    }
+  } catch {
+    /* the uploads directory is created at start-up; a reset on a bare install has none */
+  }
+  return before;
+}
+
 export function seedDemo() {
   const existing = db.prepare("SELECT COUNT(*) AS n FROM tenants").get().n;
   if (existing > 0) return false;

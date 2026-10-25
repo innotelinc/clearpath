@@ -10,10 +10,13 @@ import { Router } from "express";
 import {
   audit,
   db,
+  deleteTenant,
   getSetting,
   listTenants,
+  resetInstall,
   setSetting,
   tenantClients,
+  tenantFootprint,
   tenantTeam,
   tenantUsage
 } from "../db.js";
@@ -29,7 +32,7 @@ import {
   stripeWebhookSecret
 } from "../billing.js";
 import { createAccount, emailDeliveryNote, sendCredentials } from "../accounts.js";
-import { mailConfigured } from "../mail.js";
+import { mailConfiguredFor } from "../mail.js";
 import { throttle } from "../auth.js";
 import { verifyPassword } from "../security.js";
 import {
@@ -134,7 +137,7 @@ router.post("/logout", (req, res) => {
 /* Everything below needs an operator session. */
 router.use(requirePlatform);
 
-router.get("/", (req, res) => {
+function tenantsPage(req, res, { error = "", status = 200 } = {}) {
   const tenants = listTenants().map((tenant) => ({
     ...tenant,
     usage: tenantUsage(tenant.id),
@@ -153,12 +156,17 @@ router.get("/", (req, res) => {
     },
     { tenants: 0, active: 0, suspended: 0, clients: 0, seats: 0, openDisputes: 0, documents: 0 }
   );
-  res.render("platform/index", {
+  res.status(status).render("platform/index", {
     title: "Workspaces",
     page: "tenants",
     tenants,
-    totals
+    totals,
+    error
   });
+}
+
+router.get("/", (req, res) => {
+  tenantsPage(req, res);
 });
 
 /* ---------------- provision a workspace ---------------- */
@@ -229,12 +237,13 @@ router.post("/tenants", async (req, res) => {
     tenant,
     billing: billingSummary(tenant),
     usage: tenantUsage(tenantId),
+    footprint: tenantFootprint(tenantId),
     team: tenantTeam(tenantId),
     clients: [],
     invite: {
       name: form.owner_name,
       email: form.owner_email,
-      password: mailConfigured ? null : password,
+      password: mailConfiguredFor(tenantId) ? null : password,
       delivery: emailDeliveryNote(row)
     }
   });
@@ -251,16 +260,7 @@ router.get("/tenants/:id", (req, res) => {
       message: "No workspace has that id."
     });
   }
-  res.render("platform/tenant", {
-    title: tenant.name,
-    page: "tenants",
-    tenant,
-    billing: billingSummary(tenant),
-    usage: tenantUsage(tenant.id),
-    team: tenantTeam(tenant.id),
-    clients: tenantClients(tenant.id),
-    invite: null
-  });
+  tenantPage(req, res, tenant);
 });
 
 router.post("/tenants/:id/suspend", (req, res) => {
@@ -301,6 +301,78 @@ router.post("/tenants/:id/reactivate", (req, res) => {
   res.redirect(303, `/platform/tenants/${tenant.id}`);
 });
 
+/* ---------------- remove a workspace ---------------- */
+
+/**
+ * The page a workspace's own console renders, with the reason it did not change.
+ *
+ * A destructive form that fails has to answer with the page that was submitted —
+ * not an error page — because the operator is still looking at the workspace and
+ * the confirmation is still theirs to type.
+ */
+function tenantPage(req, res, tenant, { error = "", status = 200 } = {}) {
+  res.status(status).render("platform/tenant", {
+    title: tenant.name,
+    page: "tenants",
+    tenant,
+    billing: billingSummary(tenant),
+    usage: tenantUsage(tenant.id),
+    footprint: tenantFootprint(tenant.id),
+    team: tenantTeam(tenant.id),
+    clients: tenantClients(tenant.id),
+    invite: null,
+    error
+  });
+}
+
+router.post("/tenants/:id/delete", (req, res) => {
+  const tenant = db.prepare("SELECT * FROM tenants WHERE id = ?").get(Number(req.params.id));
+  if (!tenant) {
+    return res.status(404).render("error", {
+      title: "Workspace not found",
+      status: 404,
+      message: "No workspace has that id."
+    });
+  }
+  // Deleting is the one action here with nothing to undo it, so it is gated on
+  // typing the slug: a mis-click cannot supply it, and a stale tab cannot either.
+  if (String(req.body.confirm || "").trim().toLowerCase() !== tenant.slug.toLowerCase()) {
+    return tenantPage(req, res, tenant, {
+      status: 400,
+      error: `Nothing was deleted. Type the workspace slug (${tenant.slug}) to confirm — this removes its clients, disputes and documents for good.`
+    });
+  }
+
+  const receipt = deleteTenant(tenant.id);
+  const { clients, seats, disputes, documents } = receipt.footprint;
+  // The tenant's own audit chain went with the tenant, so the operator's record of
+  // this is the console log. Deleting a workspace is not a workspace event.
+  console.warn(
+    `Clearpath: workspace ${tenant.name} (${tenant.slug}) deleted by ${platformActor(req)} — ` +
+      `${clients} clients, ${seats} seats, ${disputes} disputes, ${documents} documents, ${receipt.files} file(s)`
+  );
+  const notice = `${tenant.name} deleted — ${clients} client${clients === 1 ? "" : "s"}, ${seats} seat${seats === 1 ? "" : "s"}, ${documents} document${documents === 1 ? "" : "s"} and ${receipt.files} file${receipt.files === 1 ? "" : "s"} removed.`;
+  res.redirect(303, `/platform?notice=${encodeURIComponent(notice)}`);
+});
+
+/* ---------------- back to a clean install ---------------- */
+
+router.post("/reset", (req, res) => {
+  if (String(req.body.confirm || "").trim().toUpperCase() !== "RESET") {
+    return tenantsPage(req, res, {
+      status: 400,
+      error: "Nothing was reset. Type RESET in capitals to confirm — it removes every workspace and every client on this deployment."
+    });
+  }
+  const removed = resetInstall();
+  console.warn(
+    `Clearpath: system reset by ${platformActor(req)} — ${removed.tenants} workspace(s), ${removed.clients} client(s), ` +
+      `${removed.files} file(s) removed; operator accounts and payment settings kept.`
+  );
+  const notice = `Reset complete — ${removed.tenants} workspace${removed.tenants === 1 ? "" : "s"} and ${removed.clients} client${removed.clients === 1 ? "" : "s"} removed. Your operator account and payment settings are untouched.`;
+  res.redirect(303, `/platform?notice=${encodeURIComponent(notice)}`);
+});
+
 /* ---------------- invite another owner ---------------- */
 
 router.post("/tenants/:id/owner", async (req, res) => {
@@ -314,18 +386,7 @@ router.post("/tenants/:id/owner", async (req, res) => {
   }
   const name = String(req.body.owner_name || "").trim().slice(0, 80);
   const email = String(req.body.owner_email || "").trim().toLowerCase().slice(0, 160);
-  const back = (error) =>
-    res.status(400).render("platform/tenant", {
-      title: tenant.name,
-      page: "tenants",
-      tenant,
-      billing: billingSummary(tenant),
-      usage: tenantUsage(tenant.id),
-      team: tenantTeam(tenant.id),
-      clients: tenantClients(tenant.id),
-      invite: null,
-      error
-    });
+  const back = (error) => tenantPage(req, res, tenant, { status: 400, error });
 
   if (!name) return back("Give the owner a name.");
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return back("Enter a valid email address.");
@@ -342,9 +403,10 @@ router.post("/tenants/:id/owner", async (req, res) => {
     tenant,
     billing: billingSummary(tenant),
     usage: tenantUsage(tenant.id),
+    footprint: tenantFootprint(tenant.id),
     team: tenantTeam(tenant.id),
     clients: tenantClients(tenant.id),
-    invite: { name, email, password: mailConfigured ? null : password, delivery: emailDeliveryNote(row) }
+    invite: { name, email, password: mailConfiguredFor(tenant.id) ? null : password, delivery: emailDeliveryNote(row) }
   });
 });
 

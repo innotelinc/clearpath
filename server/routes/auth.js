@@ -38,10 +38,34 @@ function loginPage(req, res, { mode, error = "", notice = "", email = "" }) {
 router.get("/login", (req, res) => loginPage(req, res, { mode: "agency" }));
 router.get("/portal/login", (req, res) => loginPage(req, res, { mode: "client" }));
 
+/**
+ * The sign-in form on a deployment that has no workspace.
+ *
+ * `tenantForHost` answers the first workspace, or nothing at all — which is the
+ * true state right after the platform console's reset, and the state of a fresh
+ * install before the first workspace is provisioned. Reading `tenant.status`
+ * without checking was a 500 on the one page an operator needs after a reset,
+ * so the answer is the sign-in form with the reason on it instead.
+ */
+function noWorkspace(req, res, mode, email = "") {
+  res.setHeader("Cache-Control", "no-store");
+  return res.status(503).render("login", {
+    title: "No workspace yet — Clearpath",
+    tenant: null,
+    page: "login",
+    mode,
+    email,
+    notice: "",
+    error: "This deployment has no workspace yet. An operator provisions the first one in the platform console.",
+    next: safeNext(req.body.next, mode === "client" ? "/portal" : "/app")
+  });
+}
+
 router.post("/login", (req, res) => {
   const mode = "agency";
   const email = String(req.body.email || "").trim();
   const tenant = tenantForHost(req.headers.host);
+  if (!tenant) return noWorkspace(req, res, mode, email);
   const key = `${req.ip}:${email.toLowerCase()}`;
 
   if (tenant.status === "suspended") {
@@ -81,6 +105,7 @@ router.post("/portal/login", (req, res) => {
   const mode = "client";
   const email = String(req.body.email || "").trim();
   const tenant = tenantForHost(req.headers.host);
+  if (!tenant) return noWorkspace(req, res, mode, email);
   const key = `${req.ip}:portal:${email.toLowerCase()}`;
 
   if (tenant.status === "suspended") {

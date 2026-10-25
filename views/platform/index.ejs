@@ -98,4 +98,35 @@
   <% } %>
 </section>
 
+<%# The clean-install button. It lives at the bottom of the roster because it is
+    about the whole deployment, not one workspace, and it is the last thing an
+    operator should reach for. What survives is stated here as plainly as what goes. %>
+<section class="card" style="margin-top:20px">
+  <div class="card-head">
+    <div><h2>Reset system</h2><p>Return this deployment to a clean install</p></div>
+    <span class="badge rose">Irreversible</span>
+  </div>
+  <div class="card-body stack">
+    <p class="tiny muted" style="margin:0">
+      Removes <strong><%= totals.tenants %></strong> workspace<%= totals.tenants === 1 ? "" : "s" %>,
+      <strong><%= totals.clients %></strong> client<%= totals.clients === 1 ? "" : "s" %> and every record under them — seats,
+      disputes, letters, documents (including the uploaded files), messages and the audit trail — so the next workspace
+      you provision is id 1 on an empty database.
+    </p>
+    <p class="tiny muted" style="margin:0">
+      <strong>Kept:</strong> your operator account and session, so you are still signed in when it finishes, and the
+      payment settings, so billing does not silently turn off. Prospect leads from the marketing form are removed too.
+    </p>
+    <form class="row" method="post" action="/platform/reset" style="gap:8px;align-items:flex-end"
+          data-confirm="Reset this entire deployment? Every workspace and client is removed. This cannot be undone.">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <div class="field" style="margin:0">
+        <label for="reset-confirm">Type <span class="mono">RESET</span> to confirm</label>
+        <input class="input" id="reset-confirm" name="confirm" required autocomplete="off" spellcheck="false" placeholder="RESET">
+      </div>
+      <button class="btn btn-danger" type="submit" data-busy-label="Resetting…">Reset to a clean install</button>
+    </form>
+  </div>
+</section>
+
 <%- include("../partials/platform-foot") %>
