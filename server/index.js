@@ -2,6 +2,7 @@ import "./env.js";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assetUrl } from "./assets.js";
 import { attachSession, checkCsrf, requireUser } from "./auth.js";
 import { upload } from "./uploads.js";
 import { db, ensurePlatformAdmin, seedDemo, tenantForHost, tenantStats } from "./db.js";
@@ -99,12 +100,30 @@ app.use((req, res, next) => {
   next();
 });
 
+// A URL with `?v=` names exact bytes, so it can be cached for a year and every
+// later deploy reaches the browser under a new name (see `server/assets.js`).
+// A bare `/assets/...` is what an old page or a bookmark asks for, so that one
+// stays short-lived rather than pinned.
+const asset = assetUrl(path.join(root, "public"));
+// On `app.locals` as well as the per-request locals: the error page is rendered
+// from the handler that catches a crash, and it needs this too.
+app.locals.asset = asset;
 app.use(
   "/assets",
   express.static(path.join(root, "public"), {
-    maxAge: process.env.NODE_ENV === "production" ? "7d" : 0,
     etag: true,
-    index: false
+    index: false,
+    // `maxAge` is deliberately not set: the header depends on whether the URL
+    // carries a version, which only the request knows.
+    setHeaders: (res) => {
+      const versioned = typeof res.req?.query?.v === "string" && res.req.query.v !== "";
+      res.setHeader(
+        "Cache-Control",
+        versioned && process.env.NODE_ENV === "production"
+          ? "public, max-age=31536000, immutable"
+          : "no-cache"
+      );
+    }
   })
 );
 
@@ -129,6 +148,7 @@ app.use(attachSession);
 
 app.use((req, res, next) => {
   res.locals.product = product;
+  res.locals.asset = asset;
   res.locals.path = req.path;
   res.locals.query = req.query;
   res.locals.notice = typeof req.query.notice === "string" ? req.query.notice.slice(0, 300) : "";

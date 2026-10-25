@@ -148,6 +148,25 @@ test("landing page renders the Denovo Credit marketing site", async () => {
   assert.match(res.body, /denovocredit\.com/);
 });
 
+test("the stylesheet is linked under a URL that changes with its bytes", async () => {
+  const landing = await http("/");
+  assert.equal(landing.status, 200);
+
+  // A deploy that fixes a rule must reach a browser that already has the old
+  // file. `/assets/css/app.css` is the same URL forever, so the page links it
+  // with a content hash instead and the URL itself changes.
+  const versioned = landing.body.match(/href="(\/assets\/css\/app\.css\?v=[0-9a-f]{10})"/);
+  assert.ok(versioned, "the stylesheet link should carry the file's hash");
+
+  const css = await http(versioned[1]);
+  assert.equal(css.status, 200, "the hashed URL should be served");
+  assert.equal(css.type, "text/css; charset=UTF-8");
+  assert.match(css.body, /\.kv \.k \{/, "and it should be the stylesheet that styles the portal pairs");
+
+  const plain = await http("/assets/css/app.css");
+  assert.equal(plain.body, css.body, "the hash names the same bytes, not a copy");
+});
+
 test("legal and robots routes respond", async () => {
   const privacy = await http("/legal/privacy");
   assert.equal(privacy.status, 200);
