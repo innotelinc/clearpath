@@ -6,6 +6,8 @@
 
 The credit repair operating system behind **Denovo Credit** — a multi-tenant workspace for agencies, a white-labelled client portal, and a certified mailroom that turns approved disputes into printed, tracked packets.
 
+> **Clearpath** is the ClientOps workspace behind Denovo Credit: one tenant per agency, a white-labelled client portal, a deterministic dispute drafter, a certified mailroom that prints, posts and tracks what it sends, and an operator console above the tenants. It ships as one container (Express, EJS, SQLite) and consumes the platform where it must — Cerulean Authentik for sign-in (OIDC) and OmniRoute for the optional AI rewrite — with Lob and Stripe as the postal and billing rails. Landing page: [innotelinc.github.io/clearpath](https://innotelinc.github.io/clearpath/).
+
 - **Marketing site** at `/` (Denovo Credit · denovocredit.com)
 - **Agency workspace** at `/app` — clients, disputes, mailroom, documents, audit log, settings
 - **Client portal** at `/portal` — scores, dispute status, uploads, messages
