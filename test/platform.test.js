@@ -170,6 +170,31 @@ test("the operator sees every tenant with usage counts", async () => {
   assert.match(list.body, /Tenant list/);
 });
 
+test("the console lists the demo sign-ins the seed actually created", async () => {
+  const { jar } = await platformSignIn();
+  const page = await http("/platform/credentials", { jar });
+  assert.equal(page.status, 200);
+  assert.match(page.body, /Demo sign-ins/);
+  // The password shown is the one that works, not the one the seed meant: the
+  // report verifies each candidate against the stored hash.
+  assert.match(page.body, /Denovo!2026/);
+  assert.match(page.body, /Client!2026/);
+  assert.match(page.body, /Specialist!2026/);
+  assert.match(page.body, /dana@denovocredit\.com/);
+  assert.match(page.body, /amara@example\.com/);
+  assert.match(page.body, /denovocredit\.com\/login/);
+  assert.match(page.body, /denovocredit\.com\/portal\/login/);
+  assert.match(page.body, /northstar\.clearpath\.test/);
+  assert.match(page.body, /platform@clearpath\.test/);
+  assert.match(page.body, /Platform!2026/);
+
+  // A workspace owner signed in on the agency side is not an operator.
+  const owner = await agencySignIn();
+  const denied = await http("/platform/credentials", { jar: owner.jar });
+  assert.equal(denied.status, 302);
+  assert.match(denied.location, /^\/platform\/login/);
+});
+
 test("provisioning a tenant creates it with a first owner invite", async () => {
   const { jar } = await platformSignIn();
   const page = await http("/platform/tenants/new", { jar });
@@ -584,6 +609,20 @@ test("the host can reset to a clean install without a browser", async () => {
     const seeded = await run("scripts/seed.js", []);
     assert.equal(seeded.code, 0, seeded.out);
 
+    // The same report from the shell: the seed's accounts, their passwords and
+    // the workspace's URL, read back out of the database it just wrote.
+    const creds = await run("scripts/credentials.js", []);
+    assert.equal(creds.code, 0, creds.out);
+    assert.match(creds.out, /Denovo!2026/);
+    assert.match(creds.out, /Client!2026/);
+    assert.match(creds.out, /dana@denovocredit\.com/);
+    assert.match(creds.out, /https:\/\/denovocredit\.com\/portal\/login/);
+
+    const sites = await run("scripts/credentials.js", ["--site"]);
+    assert.equal(sites.code, 0, sites.out);
+    assert.match(sites.out, /https:\/\/northstar\.clearpath\.test/);
+    assert.doesNotMatch(sites.out, /Client!2026/, "--site prints no passwords");
+
     // Refused without the word, and the estate is untouched.
     const refused = await run("scripts/reset.js", ["--confirm", "please"]);
     assert.equal(refused.code, 1);
@@ -602,6 +641,10 @@ test("the host can reset to a clean install without a browser", async () => {
     assert.equal(done.code, 0, done.out);
     assert.match(done.out, /Removed \d+ workspace/);
     assert.match(done.out, /Snapshot: /);
+
+    const empty = await run("scripts/credentials.js", []);
+    assert.equal(empty.code, 0, empty.out);
+    assert.match(empty.out, /No workspace in this database/);
 
     const after = new DatabaseSync(cliDb);
     assert.equal(after.prepare("SELECT COUNT(*) AS n FROM tenants").get().n, 0);

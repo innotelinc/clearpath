@@ -2,7 +2,12 @@
   const nav = [
     { key: "tenants", label: "Workspaces", href: "/platform", icon: "i-bank" },
     { key: "new", label: "Provision workspace", href: "/platform/tenants/new", icon: "i-plus" },
-    { key: "billing", label: "Payments", href: "/platform/billing", icon: "i-card" }
+    { key: "billing", label: "Payments", href: "/platform/billing", icon: "i-card" },
+    // The demonstration accounts only exist while the seed does, so the link
+    // does too — a production console has nothing behind it.
+    ...(typeof demoMode !== "undefined" && demoMode
+      ? [{ key: "credentials", label: "Demo sign-ins", href: "/platform/credentials", icon: "i-lock" }]
+      : [])
   ];
 %><!doctype html>
 <html lang="en">

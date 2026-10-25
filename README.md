@@ -45,6 +45,7 @@ npm test             # 45 end-to-end tests against spawned servers
 npm run seed         # seed an empty database, or inspect what exists
 npm run seed -- --reset   # wipe local data and reseed (refuses in production)
 npm run reseed -- --confirm RESEED   # rebuild the demo data, files and evidence links
+npm run credentials  # print every account in this database with its demo password and URL
 ```
 
 ### Demo accounts
@@ -69,6 +70,11 @@ operator out. Everything else on this page — billing, mailroom, pipeline — l
 workspace you land on after signing in at `/login`.
 
 The login page shows these only while `SEED_DEMO` is not `0`. Set `SEED_DEMO=0` in production and the cards disappear.
+
+`npm run credentials` prints the same list from the database actually in use — every workspace, its
+site URL, and each seat's email with the demo password that verifies against its stored hash (a
+password changed since the seed shows as `(changed)`). `npm run credentials -- --site` prints only
+the workspace URLs.
 
 Northstar is a second tenant used to demonstrate isolation. Requests are routed to a workspace by the `Host` header: `northstar.clearpath.test` (or whatever you set as its domain in Settings) resolves to Northstar, everything else falls back to the first workspace. Every query is additionally scoped by the signed-in user's `tenant_id`, so a host header alone cannot expose another agency's records.
 

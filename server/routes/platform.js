@@ -32,6 +32,7 @@ import {
   stripeWebhookSecret
 } from "../billing.js";
 import { createAccount, emailDeliveryNote, sendCredentials } from "../accounts.js";
+import { credentialReport } from "../credentials.js";
 import { mailConfiguredFor } from "../mail.js";
 import { throttle } from "../auth.js";
 import { verifyPassword } from "../security.js";
@@ -504,6 +505,37 @@ router.post("/billing/test", async (req, res) => {
     console.warn(`Clearpath: Stripe key check failed — ${err.message}`);
     return paymentsPage(req, res, { status: 502, error: err.message });
   }
+});
+
+/* ---------------- demonstration sign-ins ---------------- */
+
+/**
+ * The seed's own accounts, with the password that verifies against each hash.
+ *
+ * This is the `npm run credentials` report with a page around it, and it exists
+ * only while `SEED_DEMO` is on: a production deployment has no demonstration
+ * passwords to hand out, so the page is a 404 there rather than a link nobody
+ * should press. The report is rebuilt per request — the scrypt check is the
+ * point — and the page is never cached.
+ */
+function credentialsPage(req, res, { status = 200 } = {}) {
+  res.setHeader("Cache-Control", "no-store");
+  res.status(status).render("platform/credentials", {
+    title: "Demo sign-ins",
+    page: "credentials",
+    report: credentialReport({ origin: process.env.APP_ORIGIN || `${req.protocol}://${req.get("host")}` })
+  });
+}
+
+router.get("/credentials", (req, res) => {
+  if (process.env.SEED_DEMO === "0") {
+    return res.status(404).render("error", {
+      title: "Demo sign-ins are off",
+      status: 404,
+      message: "This deployment runs with SEED_DEMO=0, so there are no demonstration accounts to list."
+    });
+  }
+  credentialsPage(req, res);
 });
 
 export default router;
