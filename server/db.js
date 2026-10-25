@@ -536,6 +536,46 @@ function removeUpload(storedName) {
 }
 
 /**
+ * Copy the database, and the uploads about to be removed, somewhere safe.
+ *
+ * `VACUUM INTO` rather than a file copy: the deployment runs in WAL mode, so
+ * `clearpath.db` plus everything committed since the last checkpoint lives in
+ * `clearpath.db-wal` — copying the first file alone can lose the rows written
+ * most recently, which are exactly the ones a mistaken delete is about.
+ * `VACUUM INTO` writes one consistent, already-checkpointed file.
+ *
+ * The files go with it: a restored database whose document rows point at
+ * uploads that were deleted is only half an undo. `storedNames === null` means
+ * "everything in the uploads directory", which is what a reset needs.
+ *
+ * Returns `{ name, dir, database, files }`; `name` is the directory's own name
+ * so a notice can name the snapshot without printing a host path.
+ */
+function archive(tag, storedNames) {
+  const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${tag}`;
+  const dir = path.join(DATA_DIR, "backups", name);
+  fs.mkdirSync(path.join(dir, "uploads"), { recursive: true });
+  const database = path.join(dir, "database.db");
+  // VACUUM INTO takes a path in SQL, so a quote in DATA_DIR would end the string.
+  db.exec(`VACUUM INTO '${database.replace(/'/g, "''")}'`);
+
+  const names = storedNames === null ? fs.readdirSync(path.join(DATA_DIR, "uploads")) : storedNames;
+  let files = 0;
+  for (const storedName of names) {
+    if (!storedName) continue;
+    const base = path.basename(String(storedName));
+    try {
+      fs.copyFileSync(path.join(DATA_DIR, "uploads", base), path.join(dir, "uploads", base));
+      files += 1;
+    } catch {
+      // A document row can outlive its file (a manual cleanup, a restore). One
+      // missing file must not turn a delete into a refusal.
+    }
+  }
+  return { name, dir, database, files };
+}
+
+/**
  * Delete a workspace and everything hanging off it.
  *
  * The schema carries `ON DELETE CASCADE` from `tenants` to clients, users,
@@ -558,6 +598,10 @@ export function deleteTenant(tenantId) {
     .all(tenant.id)
     .map((row) => row.stored_name);
 
+  // Before anything is deleted, and outside the transaction: VACUUM cannot run
+  // inside one, and a snapshot taken after the delete would be an empty comfort.
+  const backup = archive(`delete-${tenant.slug}`, files);
+
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare("DELETE FROM tenants WHERE id = ?").run(tenant.id);
@@ -568,7 +612,7 @@ export function deleteTenant(tenantId) {
   }
 
   const removedFiles = files.filter(removeUpload).length;
-  return { tenant, footprint, files: removedFiles };
+  return { tenant, footprint, files: removedFiles, backup };
 }
 
 /**
@@ -589,6 +633,10 @@ export function deleteTenant(tenantId) {
 export function resetInstall() {
   const count = (table) => db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n || 0;
   const before = { tenants: count("tenants"), clients: count("clients"), files: 0 };
+  // The whole uploads directory is about to be swept, so the whole directory is
+  // what the snapshot carries — otherwise "undo" means a database of rows that
+  // point at files nobody can produce.
+  const backup = archive("reset", null);
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -620,7 +668,7 @@ export function resetInstall() {
   } catch {
     /* the uploads directory is created at start-up; a reset on a bare install has none */
   }
-  return before;
+  return { ...before, backup };
 }
 
 export function seedDemo() {

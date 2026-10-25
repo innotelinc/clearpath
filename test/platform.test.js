@@ -15,6 +15,17 @@ let db;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Snapshot directories the destructive routes wrote, oldest first. */
+function snapshots(suffix) {
+  const root = path.join(dataDir, "backups");
+  if (!fs.existsSync(root)) return [];
+  return fs
+    .readdirSync(root)
+    .filter((name) => name.endsWith(`-${suffix}`))
+    .sort()
+    .map((name) => path.join(root, name));
+}
+
 async function waitForServer() {
   for (let i = 0; i < 120; i += 1) {
     try {
@@ -433,6 +444,24 @@ test("deleting a workspace removes its clients, seats, documents and files", asy
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM users WHERE tenant_id = ?").get(tenant.id).n, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM documents WHERE tenant_id = ?").get(tenant.id).n, 0);
   assert.equal(fs.existsSync(uploaded), false, "the uploaded file goes with the document row");
+
+  // The delete is recoverable: the snapshot is the install as it was *before* the
+  // delete, files included, and it is the only thing that makes this reversible.
+  const [snap] = snapshots("delete-temp-co");
+  assert.ok(snap, "a snapshot was taken before the workspace was removed");
+  const archived = new DatabaseSync(path.join(snap, "database.db"));
+  const kept = archived.prepare("SELECT * FROM tenants WHERE slug = 'temp-co'").get();
+  assert.ok(kept, "the snapshot still holds the deleted workspace");
+  assert.equal(
+    archived.prepare("SELECT COUNT(*) AS n FROM clients WHERE tenant_id = ?").get(kept.id).n,
+    1,
+    "and its client row"
+  );
+  archived.close();
+  assert.ok(
+    fs.existsSync(path.join(snap, "uploads", "temp-id.pdf")),
+    "the document's file is kept beside the database copy"
+  );
 });
 
 test("sending through Lob is refused with a clear message while it is disabled", async () => {
@@ -492,6 +521,17 @@ test("resetting the system leaves a clean install with the operator and payment 
   const uploads = fs.readdirSync(path.join(dataDir, "uploads"));
   assert.deepEqual(uploads, [], "uploaded files are swept with the reset");
 
+  // The whole install before the reset is on disk, so "reset" is not "lose".
+  const [snap] = snapshots("reset");
+  assert.ok(snap, "a snapshot was taken before the reset");
+  const archived = new DatabaseSync(path.join(snap, "database.db"));
+  assert.equal(
+    archived.prepare("SELECT COUNT(*) AS n FROM tenants").get().n,
+    before,
+    "the snapshot holds every workspace the reset removed"
+  );
+  archived.close();
+
   // The operator is still signed in, and the console now reads as a clean install.
   const after = await http("/platform", { jar });
   assert.equal(after.status, 200);
@@ -512,4 +552,68 @@ test("resetting the system leaves a clean install with the operator and payment 
     form: { _csrf: portalJar.get("cp_csrf"), email: "x@y.test", password: "nope" }
   });
   assert.equal(portal.status, 503, "the portal form answers the same way");
+});
+
+test("the host can reset to a clean install without a browser", async () => {
+  const cliDir = fs.mkdtempSync(path.join(os.tmpdir(), "clearpath-reset-cli-"));
+  const cliDb = path.join(cliDir, "clearpath.db");
+  const repo = path.resolve(import.meta.dirname, "..");
+
+  const run = (script, args) =>
+    new Promise((resolve) => {
+      const proc = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", script, ...args], {
+        cwd: repo,
+        env: {
+          ...process.env,
+          DATA_DIR: cliDir,
+          DB_PATH: cliDb,
+          SEED_DEMO: "1",
+          NODE_ENV: "test",
+          PLATFORM_ADMIN_EMAIL: "",
+          PLATFORM_ADMIN_PASSWORD: ""
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      let out = "";
+      proc.stdout.on("data", (chunk) => (out += chunk));
+      proc.stderr.on("data", (chunk) => (out += chunk));
+      proc.on("exit", (code) => resolve({ code, out }));
+    });
+
+  try {
+    const seeded = await run("scripts/seed.js", []);
+    assert.equal(seeded.code, 0, seeded.out);
+
+    // Refused without the word, and the estate is untouched.
+    const refused = await run("scripts/reset.js", ["--confirm", "please"]);
+    assert.equal(refused.code, 1);
+    assert.match(refused.out, /is not RESET/);
+
+    const dry = await run("scripts/reset.js", ["--confirm", "RESET", "--dry-run"]);
+    assert.equal(dry.code, 0);
+    assert.match(dry.out, /Dry run: nothing was removed/);
+
+    const check = new DatabaseSync(cliDb);
+    const beforeCount = check.prepare("SELECT COUNT(*) AS n FROM tenants").get().n;
+    assert.ok(beforeCount > 0, "the seed created workspaces, and the refusals kept them");
+    check.close();
+
+    const done = await run("scripts/reset.js", ["--confirm", "RESET"]);
+    assert.equal(done.code, 0, done.out);
+    assert.match(done.out, /Removed \d+ workspace/);
+    assert.match(done.out, /Snapshot: /);
+
+    const after = new DatabaseSync(cliDb);
+    assert.equal(after.prepare("SELECT COUNT(*) AS n FROM tenants").get().n, 0);
+    assert.equal(after.prepare("SELECT COUNT(*) AS n FROM clients").get().n, 0);
+    after.close();
+
+    const snaps = fs.readdirSync(path.join(cliDir, "backups")).filter((name) => name.endsWith("-reset"));
+    assert.equal(snaps.length, 1, "the CLI wrote the same snapshot the console does");
+    const archived = new DatabaseSync(path.join(cliDir, "backups", snaps[0], "database.db"));
+    assert.equal(archived.prepare("SELECT COUNT(*) AS n FROM tenants").get().n, beforeCount);
+    archived.close();
+  } finally {
+    fs.rmSync(cliDir, { recursive: true, force: true });
+  }
 });

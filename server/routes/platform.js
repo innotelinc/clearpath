@@ -349,9 +349,13 @@ router.post("/tenants/:id/delete", (req, res) => {
   // this is the console log. Deleting a workspace is not a workspace event.
   console.warn(
     `Clearpath: workspace ${tenant.name} (${tenant.slug}) deleted by ${platformActor(req)} — ` +
-      `${clients} clients, ${seats} seats, ${disputes} disputes, ${documents} documents, ${receipt.files} file(s)`
+      `${clients} clients, ${seats} seats, ${disputes} disputes, ${documents} documents, ${receipt.files} file(s); ` +
+      `snapshot ${receipt.backup.dir}`
   );
-  const notice = `${tenant.name} deleted — ${clients} client${clients === 1 ? "" : "s"}, ${seats} seat${seats === 1 ? "" : "s"}, ${documents} document${documents === 1 ? "" : "s"} and ${receipt.files} file${receipt.files === 1 ? "" : "s"} removed.`;
+  const notice =
+    `${tenant.name} deleted — ${clients} client${clients === 1 ? "" : "s"}, ${seats} seat${seats === 1 ? "" : "s"}, ` +
+    `${documents} document${documents === 1 ? "" : "s"} and ${receipt.files} file${receipt.files === 1 ? "" : "s"} removed. ` +
+    `A copy of the database and those files is in backups/${receipt.backup.name}.`;
   res.redirect(303, `/platform?notice=${encodeURIComponent(notice)}`);
 });
 
@@ -367,9 +371,12 @@ router.post("/reset", (req, res) => {
   const removed = resetInstall();
   console.warn(
     `Clearpath: system reset by ${platformActor(req)} — ${removed.tenants} workspace(s), ${removed.clients} client(s), ` +
-      `${removed.files} file(s) removed; operator accounts and payment settings kept.`
+      `${removed.files} file(s) removed; operator accounts and payment settings kept; snapshot ${removed.backup.dir}`
   );
-  const notice = `Reset complete — ${removed.tenants} workspace${removed.tenants === 1 ? "" : "s"} and ${removed.clients} client${removed.clients === 1 ? "" : "s"} removed. Your operator account and payment settings are untouched.`;
+  const notice =
+    `Reset complete — ${removed.tenants} workspace${removed.tenants === 1 ? "" : "s"} and ` +
+    `${removed.clients} client${removed.clients === 1 ? "" : "s"} removed. Your operator account and payment settings are untouched. ` +
+    `The previous database and its files are in backups/${removed.backup.name}.`;
   res.redirect(303, `/platform?notice=${encodeURIComponent(notice)}`);
 });
 
