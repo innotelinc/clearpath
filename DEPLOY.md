@@ -44,14 +44,29 @@ journalctl -u clearpath -n 50 --no-pager   # boot line names the mail transport
 Updating:
 
 ```bash
-cd /opt/clearpath
-git fetch origin main && git reset --hard origin/main
-npm ci --omit=dev
-systemctl restart clearpath
+incus exec i2move:clearpath -- bash /opt/clearpath/scripts/deploy.sh --dry-run
+incus exec i2move:clearpath -- bash /opt/clearpath/scripts/deploy.sh
 ```
+
+That is the four steps this section used to spell out — snapshot the database,
+`git reset --hard origin/main`, `npm ci --omit=dev`, restart — plus the two that
+matter when the deploy is bad: it waits for `/healthz`, compares the stylesheet
+the site now serves with the one in the checkout, and puts the previous commit
+back (with its database snapshot) if either check fails. It refuses to run over
+uncommitted changes in the checkout unless given `--force`.
+
+Snapshots land in `/var/lib/clearpath/backups/clearpath-<stamp>-deploy.db` and
+nothing in the script deletes them; prune by hand. To restore one: stop the
+service, copy the file over `/var/lib/clearpath/clearpath.db` (removing `-wal`
+and `-shm` beside it), start the service.
 
 The database migrates on boot (`ensureColumn`), and `SEED_DEMO` only ever seeds a
 fresh database.
+
+Static assets are linked with a content hash (`/assets/css/app.css?v=…`, see
+`server/assets.js`), so a deploy that changes a stylesheet reaches a browser
+that cached the old one without a hard refresh. A `?v=` URL is served
+`immutable` for a year; a bare one revalidates.
 
 ## DNS, TLS and the proxy host
 
