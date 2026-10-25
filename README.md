@@ -1,5 +1,9 @@
 # Clearpath
 
+[![CI](https://github.com/innotelinc/clearpath/actions/workflows/ci.yml/badge.svg)](https://github.com/innotelinc/clearpath/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+
 The credit repair operating system behind **Denovo Credit** — a multi-tenant workspace for agencies, a white-labelled client portal, and a certified mailroom that turns approved disputes into printed, tracked packets.
 
 - **Marketing site** at `/` (Denovo Credit · denovocredit.com)
@@ -11,6 +15,19 @@ The credit repair operating system behind **Denovo Credit** — a multi-tenant w
 Continuing this project elsewhere? [HANDOFF.md](HANDOFF.md) records the current state, decisions, schema changes and open work.
 
 ---
+
+## Why Clearpath
+
+| Problem | Answer |
+| --- | --- |
+| Disputes, documents and letters live in spreadsheets and inboxes. | One workspace per agency, with every client, dispute and document in one place. |
+| Clients phone for a status they cannot see. | A white-labelled portal showing scores, dispute status, uploads and messages. |
+| Mailing a dispute packet is manual and untracked. | A certified mailroom that produces the packet, the tracking and the record. |
+| Two agencies should never share a database. | Every row carries its agency; the workspace and the portal are scoped to it. |
+
+Its place in the stack is [docs/stack.md](docs/stack.md); the canonical
+definition of the shared layers is the
+[Innotel Platform Stack](https://github.com/innotelinc/innotel-platform-stack).
 
 ## Quick start
 
@@ -353,3 +370,8 @@ Tests do not cover visual regressions, delivery by a real mail provider (the sui
 - No inbound mail: the app only sends. Replies go to `MAIL_REPLY_TO`, and Stalwart's mailbox is where you read them.
 - No delete/archive UI for users, clients or documents (deactivation is a schema change away).
 - No email verification for teammates: an owner types the address, and the invitation goes there.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright © 2026 Innotel Inc. Upstream material,
+where a directory carries its own licence, remains under that licence.
