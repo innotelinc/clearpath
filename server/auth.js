@@ -60,6 +60,12 @@ export function destroySession(req, res) {
 }
 
 export function attachSession(req, res, next) {
+  // Every page rendered below this point is that person's own view of live
+  // records, and it changes when the deployment does. A browser that keeps a
+  // copy can show yesterday's page — and did: a repaired mailroom page kept
+  // displaying the sentence the deploy had removed. Static assets are mounted
+  // above this and are unaffected; PDFs set their own headers.
+  res.setHeader("Cache-Control", "no-store");
   req.cookies = parseCookies(req.headers.cookie);
   const token = req.cookies[COOKIE];
   res.locals.user = null;

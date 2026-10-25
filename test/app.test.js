@@ -56,6 +56,7 @@ async function http(pathname, { method = "GET", form, jar, binary = false } = {}
     status: res.status,
     location: res.headers.get("location"),
     type: res.headers.get("content-type"),
+    headers: res.headers,
     body: binary ? Buffer.from(await res.arrayBuffer()) : await res.text()
   };
 }
@@ -430,6 +431,7 @@ test("a package posted before letter bodies were stored still shows the letter",
 
   const page = await http(`/app/mailroom/${pkg.lastInsertRowid}`, { jar });
   assert.equal(page.status, 200);
+  assert.equal(page.headers.get("cache-control"), "no-store", "a browser may not keep this page");
   assert.match(
     page.body,
     /Formal dispute of inaccurate information —/,
