@@ -411,6 +411,35 @@ test("full case workflow: client, tradeline, dispute, package, mailing", async (
   assert.match(audit.body, /Created mailing package/);
 });
 
+test("a package posted before letter bodies were stored still shows the letter", async () => {
+  const { jar } = await signIn("dana@denovocredit.com", "Denovo!2026");
+  const dispute = inspect
+    .prepare("SELECT * FROM disputes WHERE tenant_id = 1 ORDER BY id DESC LIMIT 1")
+    .get();
+  assert.ok(dispute, "the demo seed should leave a dispute to post");
+
+  // The shape of a package mailed by the version that stamped the reference and
+  // left the body empty — the page used to name the letter and show nothing.
+  const ref = `CP-LEGACY-${Date.now()}`;
+  const pkg = inspect
+    .prepare("INSERT INTO packages (tenant_id, client_id, ref, bureau, letters, status) VALUES (?, ?, ?, ?, 1, 'mailed')")
+    .run(dispute.tenant_id, dispute.client_id, ref, dispute.bureau);
+  inspect
+    .prepare("INSERT INTO package_letters (tenant_id, package_id, dispute_id, ref, account, bureau, body) VALUES (?, ?, ?, ?, ?, ?, '')")
+    .run(dispute.tenant_id, Number(pkg.lastInsertRowid), dispute.id, dispute.ref, dispute.account, dispute.bureau);
+
+  const page = await http(`/app/mailroom/${pkg.lastInsertRowid}`, { jar });
+  assert.equal(page.status, 200);
+  assert.match(
+    page.body,
+    /Formal dispute of inaccurate information —/,
+    "the letter the dispute would print is on the page"
+  );
+  assert.match(page.body, /To Whom It May Concern:/);
+  assert.match(page.body, /The dispute's current text/, "and it is labelled as today's text, not the posted one");
+  assert.doesNotMatch(page.body, /only the dispute reference survives/, "the dead end is gone");
+});
+
 test("client portal accepts a hashed document upload", async () => {
   const { jar } = await signIn("amara@example.com", "Client!2026", "client");
   const png = Buffer.from(

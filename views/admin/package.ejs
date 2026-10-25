@@ -151,10 +151,17 @@
           <div class="card-body" style="border-top:1px solid var(--line)">
             <% if (String(letter.body || "").trim()) { %>
               <pre class="doc-body" style="white-space:pre-wrap;margin:0"><%= letter.body %></pre>
+              <% if (letter.live) { %>
+                <p class="tiny muted" style="margin:12px 0 0">
+                  The dispute's current text. This package was posted before its letters were stored,
+                  so no copy of the printed page survived — this is the closest record left, and it
+                  may differ from what was mailed.
+                </p>
+              <% } %>
             <% } else { %>
               <p class="tiny muted" style="margin:0">
-                This letter was recorded before letter bodies were stored, so only the dispute reference survives.
-                Open the dispute for its current text.
+                Nothing is left to show for this letter: it was recorded before letter bodies were
+                stored, and the dispute it names is no longer in this workspace.
               </p>
             <% } %>
             <% if (letter.dispute_id) { %>

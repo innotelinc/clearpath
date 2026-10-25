@@ -13,7 +13,7 @@ import { createCertifiedLetter, lobConfigured, lobMode, parseAddress } from "../
 import {
   allRequests, clientDisputes, clientDocuments, clientMessages, clientPackages, clientRequests,
   clientTradelines, clientsMap, getClient, getDispute, getDocument, listClients, listDisputes,
-  listDocuments, listPackages
+  listDocuments, listPackages, liveLetterBody
 } from "../data.js";
 import { bureau, fmtDate, fmtDay, money, sendPdf } from "../util.js";
 import { sizeLabel, sha256, storeUpload } from "../uploads.js";
@@ -618,6 +618,15 @@ router.get("/mailroom/:id", (req, res) => {
       )
       .all(pkg.id, t);
   }
+  // Rows written before the text was captured carry the reference and nothing
+  // else. The dispute is still there to build the letter from, so show that and
+  // mark it: a package page that names a letter and refuses to show one tells
+  // the operator less than it knows.
+  letters = letters.map((letter) => {
+    if (String(letter.body || "").trim()) return { ...letter, live: false };
+    const body = letter.dispute_id ? liveLetterBody(req.tenant, t, letter.dispute_id) : "";
+    return { ...letter, body, live: body !== "" };
+  });
 
   const dispatches = db
     .prepare("SELECT * FROM mail_dispatches WHERE tenant_id = ? AND package_id = ? ORDER BY id")

@@ -1,4 +1,5 @@
 import { db } from "./db.js";
+import { letterText } from "./pdf.js";
 
 export const getClient = (tenantId, clientId) =>
   db.prepare("SELECT * FROM clients WHERE id = ? AND tenant_id = ?").get(Number(clientId), tenantId);
@@ -51,6 +52,35 @@ export const clientTradelines = (tenantId, clientId) =>
 
 export const clientPackages = (tenantId, clientId) =>
   db.prepare("SELECT * FROM packages WHERE tenant_id = ? AND client_id = ? ORDER BY id DESC").all(tenantId, clientId);
+
+/**
+ * The letter a dispute would print today.
+ *
+ * Packages posted before `package_letters.body` was filled in have the
+ * reference, the bureau and nothing to read: the mailroom could only say so.
+ * The dispute itself still carries everything the letter is built from, and
+ * this is the same function `/app/disputes/:id` renders, so the package page
+ * can show the text the operator would see there — labelled as the current
+ * text, because it is not a copy of what went in the envelope.
+ */
+export function liveLetterBody(tenant, tenantId, disputeId) {
+  const dispute = getDispute(tenantId, disputeId);
+  if (!dispute) return "";
+  const tradeline = {
+    creditor: dispute.creditor || String(dispute.account).split("••")[0].trim(),
+    mask: dispute.mask || (String(dispute.account).split("••")[1] || "").trim(),
+    type: dispute.tradeline_type || "Collection",
+    balance: dispute.balance || 0,
+    reason: dispute.issue,
+    evidence: dispute.evidence || "[]"
+  };
+  return letterText({
+    tenant,
+    client: { name: dispute.client_name, email: dispute.client_email, phone: dispute.client_phone },
+    dispute,
+    tradeline
+  });
+}
 
 /**
  * Exactly what went into each envelope, frozen at mailing time. The portal
